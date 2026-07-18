@@ -1,0 +1,20 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+*.npz
+
+# Local validation media and generated artifacts
+testdata/*.mp4
+artifacts/
+results/
+models/
+third_party/
+*.pth
+*.pt
+*.safetensors
+
+# Editor temporary files
+docs/.$*.dtmp
