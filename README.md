@@ -1,34 +1,61 @@
 # DepthSync
 
-DepthSync 用一张高质量拍照深度图作为时间锚点，把低分辨率、尺度漂移的视频深度序列统一到拍照深度的尺度，并降低 Live Photo 人像虚化在照片/视频切换时的跳变。实现是无需训练的轻量方案。
+DepthSync 用拍照帧的高质量深度作为锚点，把短视频的相对 disparity 对齐到同一尺度，降低 Live Photo 在照片和视频之间切换时的虚化跳变。
 
-## 算法
+默认实现面向端侧：拍后阶段只估计每帧两个标量 `scale/offset`，播放阶段只做一次逐像素乘加，不计算稠密光流，也不缓存整段高分辨率深度。
 
-1. 默认将深度转成逆深度（disparity）工作，以便用仿射模型表达常见单目深度的 scale/shift 歧义。
-2. 在照片对应的视频帧上，用分位数初始化 + Huber IRLS 拟合 `D_photo ≈ a D_video + b`。
-3. 以照片帧为中心向前、向后传播。若提供 RGB，使用稠密光流把上一张同步深度 warp 到当前帧，并通过前后向一致性与亮度残差估计置信度；无 RGB 时使用保守的同位置传播。
-4. 每帧先对传播结果重新做鲁棒 scale/shift 标定，再按光流置信度与深度分歧自适应时域融合。真实运动/遮挡区域更多相信当前视频深度，稳定区域更多继承锚点尺度。
-5. 照片锚帧注入受控的高频残差，提升边缘细节。非锚帧的细节随光流逐帧传播，遮挡处会自动衰减。
+## 轻量算法
 
-这套方法适合短时、运动有限的 Live Photo。它不会凭空恢复视频中照片不可见区域的细节；若需要强泛化的细节生成，可在本方案输出后增加一个小型 refinement 网络。
+1. 将照片 disparity 粗配准并降采样到视频深度分辨率。
+2. 在低梯度有效区固定采样，使用分位数初始化、MAD 剔除和一次闭式加权最小二乘拟合锚帧 `scale/offset`。
+3. 锚点前后第一帧锁定锚帧参数，保证照片切换邻域不会因自适应更新而退化。
+4. 从锚点向前、向后扫描，通过已有编码/ISP block MV 建立少量对应点，逐帧更新 `scale/offset`。
+5. 对参数做置信度平滑和单帧变化限幅；MV 缺失或拟合失败时冻结上一帧参数。
 
-## 使用
+测试素材没有 ISP MV，因此验证工具使用 18×32 稀疏 LK 网格模拟输入。该适配器不属于端侧主算法。
+
+## 安装和测试
 
 ```powershell
 python -m pip install -e .
-depthsync --video-depth video_depth.npy --photo-depth photo_depth.npy --anchor 15 --rgb-dir frames --output synced.npz
-```
-
-- `video_depth.npy`: `[T,H,W]` 浮点数组。
-- `photo_depth.npy`: `[H2,W2]` 浮点数组；输出采用此分辨率。
-- `frames/`: 可选，按文件名排序的 RGB 帧，数量必须等于 T。
-- 输出包含 `depths/scales/offsets/confidences`。
-- 若输入本身是 inverse depth/disparity，添加 `--mode disparity`。
-
-生产接入时应保持深度单位一致、明确无效值（本实现把非有限值及 `<=0` 视为无效），并建议用人像 mask 限制拟合区域，避免大面积动态背景主导标定。
-
-## 测试
-
-```powershell
 python -m unittest discover -s tests -v
 ```
+
+核心接口：
+
+```python
+sync = DepthSync(DepthSyncConfig(depth_mode="disparity"))
+result = sync.offline_prepare(video_depths, photo_depth, anchor_index, motion, face_box)
+display_depth = sync.apply_frame(video_depth, result.parameters[frame_index])
+```
+
+`offline_prepare` 输出同步深度、逐帧参数、置信度和回退原因。生产环境可以只保存参数表，在播放时调用 `apply_frame`。
+
+## 三视频验证
+
+三个本地视频不会进入 Git。以下命令从每段视频中间截取 3 秒，统一采样为 30 fps / 90 帧，锚帧为索引 45：
+
+```powershell
+python -m depthsync.validation testdata\01.mp4 testdata\02.mp4 testdata\03.mp4
+```
+
+模型验证使用官方 DepthPro 和 Video Depth Anything Small streaming。模型源码、权重及生成深度均在忽略目录中；精确来源和 SHA-256 见 `config/model-sources.json`。
+
+```powershell
+<model-python> tools\run_depth_models.py vda `
+  --clip artifacts\clips\01\clip.mp4 --output-dir artifacts\depth\01
+
+<model-python> tools\run_depth_models.py depthpro `
+  --anchor artifacts\clips\01\anchor.png --output-dir artifacts\depth\01
+
+python -m depthsync.evaluate
+```
+
+评估输出：
+
+- `results/<scene>/comparison.mp4`：固定锚点映射与参数传播的虚化对比；
+- `results/<scene>/parameters.csv`：逐帧参数与回退原因；
+- `results/<scene>/metrics.json`：尺度、CoC 跳变和耗时；
+- `reports/validation.md`：三段视频汇总报告。
+
+`artifacts/`、`results/`、权重和测试 MP4 均被忽略，只有小型指标报告进入 Git。

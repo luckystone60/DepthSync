@@ -20,6 +20,7 @@ class DepthSyncConfig:
     parameter_smoothing: float = 0.65
     max_scale_delta: float = 0.03
     max_offset_delta_fraction: float = 0.02
+    anchor_lock_radius: int = 1
     min_fit_pixels: int = 128
     high_res_interpolation: int = cv2.INTER_LINEAR
     eps: float = 1e-6
@@ -65,7 +66,7 @@ class SyncResult:
 
 
 def _valid(x: np.ndarray) -> np.ndarray:
-    return np.isfinite(x) & (x > 0)
+    return np.isfinite(x)
 
 
 def _resize(x: np.ndarray, shape: tuple[int, int], interpolation: int = cv2.INTER_LINEAR) -> np.ndarray:
@@ -75,16 +76,16 @@ def _resize(x: np.ndarray, shape: tuple[int, int], interpolation: int = cv2.INTE
 def _to_working(x: np.ndarray, mode: str, eps: float) -> np.ndarray:
     x = x.astype(np.float32)
     if mode == "disparity":
-        return np.where(_valid(x), x, np.nan)
+        return np.where(np.isfinite(x), x, np.nan)
     if mode == "depth":
-        return np.where(_valid(x), 1.0 / np.maximum(x, eps), np.nan)
+        return np.where(np.isfinite(x) & (x > 0), 1.0 / np.maximum(x, eps), np.nan)
     raise ValueError("depth_mode must be 'depth' or 'disparity'")
 
 
 def _from_working(x: np.ndarray, mode: str, eps: float) -> np.ndarray:
     if mode == "depth":
         return np.where(np.isfinite(x) & (x > eps), 1.0 / np.maximum(x, eps), np.nan)
-    return x
+    return np.maximum(x, 0.0)
 
 
 def _weighted_affine(x: np.ndarray, y: np.ndarray, w: np.ndarray, eps: float) -> tuple[float, float]:
@@ -235,13 +236,16 @@ class DepthSync:
             reasons[anchor_index] = "insufficient_anchor_support"
         scales[anchor_index], offsets[anchor_index], confidences[anchor_index] = a, b, confidence
         outputs[anchor_index] = (a * raw[anchor_index] + b).astype(np.float32)
-        valid_photo = photo[_valid(photo)]
+        valid_photo = photo[np.isfinite(photo)]
         photo_range = float(np.quantile(valid_photo, 0.9) - np.quantile(valid_photo, 0.1)) if valid_photo.size else 1.0
 
         for direction in (-1, 1):
             previous_index = anchor_index
             for i in range(anchor_index + direction, -1 if direction < 0 else n, direction):
-                previous = outputs[previous_index]
+                # The first neighbor on each side is fitted directly against the
+                # photo anchor. This protects the visible still/video switch;
+                # farther frames propagate from the previous synchronized map.
+                previous = photo if previous_index == anchor_index else outputs[previous_index]
                 assert previous is not None
                 xs, ys = _sample_coordinates(raw[i], cfg, face_box)
                 source = _bilinear_sample(raw[i], xs, ys)
@@ -275,6 +279,9 @@ class DepthSync:
                     a = float(np.clip(a, prev_a * (1.0 - cfg.max_scale_delta), prev_a * (1.0 + cfg.max_scale_delta)))
                     max_offset_delta = cfg.max_offset_delta_fraction * max(photo_range, cfg.eps)
                     b = float(np.clip(b, prev_b - max_offset_delta, prev_b + max_offset_delta))
+                if abs(i - anchor_index) <= cfg.anchor_lock_radius:
+                    a, b = scales[anchor_index], offsets[anchor_index]
+                    reasons[i] = "anchor_lock"
                 scales[i], offsets[i], confidences[i] = a, b, fit_conf
                 outputs[i] = (a * raw[i] + b).astype(np.float32)
                 previous_index = i

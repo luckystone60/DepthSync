@@ -42,11 +42,20 @@ class DepthSyncTest(unittest.TestCase):
         result = DepthSync(DepthSyncConfig(min_fit_pixels=32, sample_count=256)).offline_prepare(video, base, 2, motion)
         self.assertTrue(np.all(np.isfinite(result.scales)))
         self.assertEqual(len(result.fallback_reasons), t)
+        self.assertEqual(result.scales[1], result.scales[2])
+        self.assertEqual(result.scales[3], result.scales[2])
+        self.assertEqual(result.fallback_reasons[1], "anchor_lock")
+        self.assertEqual(result.fallback_reasons[3], "anchor_lock")
 
     def test_apply_frame_uses_only_scale_and_offset(self):
         depth = np.array([[1.0, 2.0]], np.float32)
         result = DepthSync().apply_frame(depth, FrameParameters(2.0, -0.5, 1.0))
         np.testing.assert_allclose(result, [[1.5, 3.5]])
+
+    def test_zero_is_valid_for_relative_disparity(self):
+        depth = np.array([[0.0, 1.0]], np.float32)
+        result = DepthSync().apply_frame(depth, FrameParameters(2.0, 0.25, 1.0))
+        np.testing.assert_allclose(result, [[0.25, 2.25]])
 
     def test_invalid_arguments(self):
         with self.assertRaises(ValueError):
