@@ -33,7 +33,14 @@ def main() -> None:
     rgb = _load_rgb(Path(args.rgb_dir)) if args.rgb_dir else None
     sync = DepthSync(DepthSyncConfig(depth_mode=args.mode, temporal_strength=args.temporal_strength, detail_strength=args.detail_strength))
     result = sync(list(video), photo, args.anchor, rgb)
-    np.savez_compressed(args.output, depths=result.depths, scales=result.scales, offsets=result.offsets, confidences=result.confidences)
+    np.savez_compressed(
+        args.output,
+        depths=result.depths,
+        scales=result.scales,
+        offsets=result.offsets,
+        confidences=result.confidences,
+        fallback_reasons=np.asarray(result.fallback_reasons),
+    )
 
 
 if __name__ == "__main__":

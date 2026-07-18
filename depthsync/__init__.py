@@ -1,3 +1,3 @@
-from .core import DepthSync, DepthSyncConfig, SyncResult
+from .core import DepthSync, DepthSyncConfig, FrameParameters, MotionSequence, SyncResult
 
-__all__ = ["DepthSync", "DepthSyncConfig", "SyncResult"]
+__all__ = ["DepthSync", "DepthSyncConfig", "FrameParameters", "MotionSequence", "SyncResult"]
