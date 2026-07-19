@@ -7,6 +7,7 @@ import numpy as np
 
 from depthsync import DepthSync, DepthSyncConfig, FrameParameters, MotionSequence
 from depthsync.validation import prepare_validation_clip
+from depthsync.depth_visualization import colorize_depth, depth_to_gray16, normalize_depth
 
 
 class DepthSyncTest(unittest.TestCase):
@@ -56,6 +57,15 @@ class DepthSyncTest(unittest.TestCase):
         depth = np.array([[0.0, 1.0]], np.float32)
         result = DepthSync().apply_frame(depth, FrameParameters(2.0, 0.25, 1.0))
         np.testing.assert_allclose(result, [[0.25, 2.25]])
+
+    def test_depth_visualization_uses_explicit_limits(self):
+        depth = np.array([[0.0, 0.5, 1.0]], np.float32)
+        normalized = normalize_depth(depth, (0.0, 1.0))
+        np.testing.assert_allclose(normalized, depth)
+        self.assertEqual(colorize_depth(depth, (0.0, 1.0)).shape, (1, 3, 3))
+        gray16 = depth_to_gray16(depth, (0.0, 1.0))
+        self.assertEqual(gray16.dtype, np.uint16)
+        self.assertEqual(int(gray16[0, -1]), 65535)
 
     def test_invalid_arguments(self):
         with self.assertRaises(ValueError):

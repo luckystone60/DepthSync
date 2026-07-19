@@ -49,6 +49,7 @@ python -m depthsync.validation testdata\01.mp4 testdata\02.mp4 testdata\03.mp4
   --anchor artifacts\clips\01\anchor.png --output-dir artifacts\depth\01
 
 python -m depthsync.evaluate
+python -m depthsync.depth_visualization
 ```
 
 评估输出：
@@ -57,5 +58,13 @@ python -m depthsync.evaluate
 - `results/<scene>/parameters.csv`：逐帧参数与回退原因；
 - `results/<scene>/metrics.json`：尺度、CoC 跳变和耗时；
 - `reports/validation.md`：三段视频汇总报告。
+
+每个场景的 `results/<scene>/depth_visualization/` 还包含：
+
+- `depth_comparison.mp4`：RGB、原始 VDA、照片值域下的原始 VDA、同步结果和 DepthPro 锚点五联视频；
+- `vda_raw_color.mp4` / `vda_raw_gray.mp4`：原始深度彩色与灰度视频；
+- `depthsync_color.mp4` / `depthsync_gray.mp4`：同步后彩色与灰度视频；
+- `anchor_comparison.png`：锚帧五联对比图；
+- `anchor_*_gray16.png`：使用 `visualization.json` 中值域解释的 16-bit 深度可视化图。
 
 `artifacts/`、`results/`、权重和测试 MP4 均被忽略，只有小型指标报告进入 Git。
