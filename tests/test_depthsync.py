@@ -103,7 +103,7 @@ class DepthSyncTest(unittest.TestCase):
             )
         )
         result = sync.offline_prepare(video, photo, anchor, motion=motion)
-        self.assertGreater(float(np.mean(result.static_mask)), 0.9)
+        self.assertGreater(float(np.mean(result.static_mask)), 0.6)
         wall_median = np.median(result.depths[:, :, : w // 3], axis=(1, 2))
         self.assertLess(float(np.ptp(wall_median)), 1e-4)
         replay = sync.apply_frame(video[0], result.parameters[0])
@@ -113,6 +113,20 @@ class DepthSyncTest(unittest.TestCase):
         depth = np.array([[1.0, 2.0]], np.float32)
         result = DepthSync().apply_frame(depth, FrameParameters(2.0, -0.5, 1.0))
         np.testing.assert_allclose(result, [[1.5, 3.5]])
+
+    def test_coarse_correction_is_suppressed_at_depth_edges(self):
+        depth = np.full((12, 16), 0.2, np.float32)
+        depth[:, 8:] = 0.8
+        params = FrameParameters(
+            1.0,
+            0.0,
+            1.0,
+            residual_grid=np.full((3, 4), 0.3, np.float32),
+            guidance_range=0.6,
+        )
+        output = DepthSync().apply_frame(depth, params)
+        self.assertGreater(float(output[6, 1] - depth[6, 1]), 0.25)
+        self.assertLess(float(abs(output[6, 7] - depth[6, 7])), 1e-5)
 
     def test_zero_is_valid_for_relative_disparity(self):
         depth = np.array([[0.0, 1.0]], np.float32)

@@ -31,6 +31,7 @@ def main() -> None:
         residual_grids=result.residual_grids,
         static_mask=result.static_mask,
         static_target_grid=result.static_target_grid,
+        guidance_range=np.float32(result.guidance_range),
         fallback_reasons=np.asarray(result.fallback_reasons),
     )
 

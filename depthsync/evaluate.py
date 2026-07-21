@@ -190,6 +190,7 @@ def evaluate_scene(
         "v3_parameter_bytes": int(
             v3.lut_x.nbytes + v3.lut_y.nbytes + v3.residual_grids.nbytes
             + v3.static_mask.nbytes + v3.static_target_grid.nbytes
+            + np.dtype(np.float32).itemsize
         ),
         "v3_fallback_frames": int(sum(bool(reason) for reason in v3.fallback_reasons)),
     }
@@ -225,6 +226,7 @@ def evaluate_scene(
         residual_grids=v3.residual_grids,
         static_mask=v3.static_mask,
         static_target_grid=v3.static_target_grid,
+        guidance_range=np.float32(v3.guidance_range),
         fallback_reasons=np.asarray(v3.fallback_reasons),
     )
     with (result_dir / "parameters.csv").open("w", newline="", encoding="utf-8") as stream:
@@ -239,7 +241,7 @@ def evaluate_scene(
 def write_report(metrics: list[dict[str, float | int | str]], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
-        "# DepthSync V3.2 时域稳定性验证结果",
+        "# DepthSync V3.3 时域稳定性验证结果",
         "",
         "| 场景 | 锚帧 NMAE V1→V3 | 人脸切换 V1→V3 | 全局切换 V1→V3 | 时序 P95 V1→V3 | 最大新增跳变（帧） | V3 ms/帧 |",
         "|---|---:|---:|---:|---:|---:|---:|",
@@ -263,15 +265,16 @@ def write_report(metrics: list[dict[str, float | int | str]], path: Path) -> Non
             "- 旧版残差只在 ±15 帧衰减，权重变化和累计 MV 噪声进一步放大了相邻帧差异。",
             "- V3.1 固定锚帧 LUT 的非线性形状，逐帧只允许受限 affine 修正；锚点附近渐进解锁，并把残差衰减扩展到 ±30 帧。",
             "- V3.2 将低运动、低相对深度变化区域识别为静态背景，播放时直接复用照片的 32×18 静态目标层，消除固定墙面的慢漂移；动态区域仍使用 V3.1 路径。",
+            "- V3.3 增加时序范围门控、照片深度边缘腐蚀和逐帧深度边缘保护；静态层不再侵入人物轮廓，粗残差也不会跨前后景混合。",
             "",
             "## 01 左墙专项检查",
             "",
             f"- V1 墙面中位值全片范围：{metrics[0].get('v1_static_median_range', float('nan')):.4f}。",
-            f"- V3.2 墙面中位值全片范围：{metrics[0].get('v3_static_median_range', float('nan')):.4f}；相对 DepthPro 中位值偏差：{metrics[0].get('v3_static_photo_bias', float('nan')):.4f}。",
+            f"- V3.3 墙面中位值全片范围：{metrics[0].get('v3_static_median_range', float('nan')):.4f}；相对 DepthPro 中位值偏差：{metrics[0].get('v3_static_photo_bias', float('nan')):.4f}。",
             "",
             "## 口径",
             "",
-            "- V1 是逐帧全局 affine；V3.2 固定锚帧 8 节点单调 LUT 的形状，只允许逐帧小幅 affine 修正，动态区域叠加 16×9 残差网格，静态区域使用全片共享的 32×18 照片目标层。",
+            "- V1 是逐帧全局 affine；V3.3 固定锚帧 8 节点单调 LUT 的形状，只允许逐帧小幅 affine 修正，动态区域叠加 16×9 残差网格，静态区域使用全片共享的 64×36 照片目标层。",
             "- LUT 修正在锚点附近渐进解锁；残差通过稀疏 block MV 传播，在 ±30 帧内使用余弦权重衰减。",
             "- 时序指标是 block MV 补偿后的相邻帧中位差，P95 和最大新增跳变忽略首尾各 5 帧的流式模型启动/结束区。",
             "- 每段素材取中间 3 秒并统一为 30 fps / 90 帧，照片锚点为第 45 帧。",
