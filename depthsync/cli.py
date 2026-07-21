@@ -14,7 +14,7 @@ def main() -> None:
     p.add_argument("--output", required=True, help="output .npz")
     p.add_argument("--mode", choices=("depth", "disparity"), default="depth")
     p.add_argument("--mapping", choices=("affine", "lut"), default="lut")
-    p.add_argument("--residual-radius", type=int, default=15)
+    p.add_argument("--residual-radius", type=int, default=30)
     args = p.parse_args()
     video = np.load(args.video_depth)
     photo = np.load(args.photo_depth)

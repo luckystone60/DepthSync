@@ -105,7 +105,9 @@ def render_scene(scene: str, clip_root: Path, depth_root: Path, result_root: Pat
     synced = np.load(result_root / scene / "synced_depth.npz")["disparity"].astype(np.float32)
     photo = np.load(depth_dir / "photo_disparity.npy").astype(np.float32)
     manifest = json.loads((clip_dir / "manifest.json").read_text(encoding="utf-8"))
+    metrics = json.loads((result_root / scene / "metrics.json").read_text(encoding="utf-8"))
     anchor = int(manifest["anchor_index"])
+    jump_frame = int(metrics["v3_excess_jump_frame"])
     fps = float(manifest["target_fps"])
     if len(raw) != len(affine) or len(raw) != len(synced):
         raise ValueError(f"Frame count mismatch for scene {scene}")
@@ -130,17 +132,20 @@ def render_scene(scene: str, clip_root: Path, depth_root: Path, result_root: Pat
     if not writer.isOpened():
         raise ValueError(f"Cannot create video: {comparison_path}")
     anchor_comparison = None
+    temporal_check: list[np.ndarray] = []
     for index in range(len(raw)):
         panels = [
             _panel(colorize_depth(raw[index], photo_limits), f"VDA raw / shared range / {index:02d}", panel_size, photo_limits),
             _panel(colorize_depth(affine[index], photo_limits), "V1 affine / shared range", panel_size, photo_limits),
-            _panel(colorize_depth(synced[index], synced_limits), "V3 LUT+grid / shared range", panel_size, synced_limits),
+            _panel(colorize_depth(synced[index], synced_limits), "V3.1 stable LUT+grid", panel_size, synced_limits),
             _panel(photo_color, "DepthPro anchor / photo range", panel_size, photo_limits),
         ]
         frame = np.hstack(panels)
         writer.write(frame)
         if index == anchor:
             anchor_comparison = frame
+        if abs(index - jump_frame) <= 1:
+            temporal_check.append(frame)
     writer.release()
     if anchor_comparison is None:
         raise ValueError(f"Anchor frame {anchor} missing for scene {scene}")
@@ -149,6 +154,7 @@ def render_scene(scene: str, clip_root: Path, depth_root: Path, result_root: Pat
     anchor_affine = colorize_depth(affine[anchor], photo_limits)
     anchor_synced = colorize_depth(synced[anchor], photo_limits)
     cv2.imwrite(str(output_dir / "anchor_comparison.png"), anchor_comparison)
+    cv2.imwrite(str(output_dir / "worst_temporal_comparison.png"), np.vstack(temporal_check))
     cv2.imwrite(str(output_dir / "anchor_vda_raw_color.png"), anchor_raw)
     cv2.imwrite(str(output_dir / "anchor_affine_color.png"), anchor_affine)
     cv2.imwrite(str(output_dir / "anchor_depthsync_color.png"), anchor_synced)
@@ -173,6 +179,7 @@ def render_scene(scene: str, clip_root: Path, depth_root: Path, result_root: Pat
             "synced_color_video": "depthsync_color.mp4",
             "synced_gray_video": "depthsync_gray.mp4",
             "anchor_comparison": "anchor_comparison.png",
+            "worst_temporal_comparison": "worst_temporal_comparison.png",
         },
     }
     (output_dir / "visualization.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")

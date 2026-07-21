@@ -26,9 +26,13 @@ class DepthSyncConfig:
     mapping_mode: str = "lut"
     lut_nodes: int = 8
     residual_grid_shape: tuple[int, int] = (9, 16)
-    residual_radius: int = 15
+    residual_radius: int = 30
     residual_clip_fraction: float = 0.35
     residual_blur_sigma: float = 0.8
+    anchor_transition_radius: int = 6
+    lut_max_scale_delta: float = 0.01
+    lut_max_offset_delta_fraction: float = 0.005
+    residual_motion_strength: float = 0.35
     eps: float = 1e-6
 
 
@@ -340,14 +344,15 @@ def _make_residual_grid(residual: np.ndarray, photo_range: float, cfg: DepthSync
 def _warp_residual_grid(
     grid: np.ndarray,
     field: Optional[np.ndarray],
+    motion_strength: float = 1.0,
 ) -> np.ndarray:
     if grid.size == 0 or field is None:
         return grid.copy()
     grid_h, grid_w = grid.shape
     dense = cv2.resize(field.astype(np.float32), (grid_w, grid_h), interpolation=cv2.INTER_LINEAR)
     yy, xx = np.mgrid[:grid_h, :grid_w].astype(np.float32)
-    map_x = xx + dense[..., 0] * max(grid_w - 1, 1)
-    map_y = yy + dense[..., 1] * max(grid_h - 1, 1)
+    map_x = xx + motion_strength * dense[..., 0] * max(grid_w - 1, 1)
+    map_y = yy + motion_strength * dense[..., 1] * max(grid_h - 1, 1)
     return cv2.remap(grid, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE).astype(np.float32)
 
 
@@ -428,7 +433,11 @@ class DepthSync:
                 confidence = lut_confidence
         if confidence <= 0:
             reasons[anchor_index] = "insufficient_anchor_support"
-        scales[anchor_index], offsets[anchor_index], confidences[anchor_index] = a, b, confidence
+        if cfg.mapping_mode == "lut":
+            scales[anchor_index], offsets[anchor_index] = 1.0, 0.0
+        else:
+            scales[anchor_index], offsets[anchor_index] = a, b
+        confidences[anchor_index] = confidence
         lut_x[anchor_index], lut_y[anchor_index] = anchor_lut_x, anchor_lut_y
         if cfg.mapping_mode == "lut":
             base_outputs[anchor_index] = _apply_lut(raw[anchor_index], anchor_lut_x, anchor_lut_y, cfg.eps)
@@ -445,7 +454,11 @@ class DepthSync:
                 previous = base_outputs[previous_index]
                 assert previous is not None
                 xs, ys = _sample_coordinates(raw[i], cfg, face_box)
-                source = _bilinear_sample(raw[i], xs, ys)
+                if cfg.mapping_mode == "lut":
+                    pre_mapped = _apply_lut(raw[i], anchor_lut_x, anchor_lut_y, cfg.eps)
+                else:
+                    pre_mapped = raw[i]
+                source = _bilinear_sample(pre_mapped, xs, ys)
                 weights = np.ones_like(source, np.float32)
                 mapped_x, mapped_y = xs.copy(), ys.copy()
                 if motion is not None:
@@ -463,14 +476,7 @@ class DepthSync:
                 target = _bilinear_sample(previous, mapped_x, mapped_y)
                 in_bounds = (mapped_x >= 0) & (mapped_x < shape[1] - 1) & (mapped_y >= 0) & (mapped_y < shape[0] - 1)
                 weights *= in_bounds.astype(np.float32)
-                candidate_a, candidate_b, affine_fit_conf = robust_affine_samples(source, target, weights, cfg)
-                candidate_x, candidate_y = _affine_lut(source, candidate_a, candidate_b, cfg)
-                fit_conf = affine_fit_conf
-                if cfg.mapping_mode == "lut":
-                    fitted_x, fitted_y, lut_fit_conf = robust_monotonic_lut_samples(source, target, weights, cfg)
-                    if lut_fit_conf > 0:
-                        candidate_x, candidate_y = _canonical_lut(fitted_x, fitted_y, cfg.lut_nodes, cfg.eps)
-                        fit_conf = lut_fit_conf
+                candidate_a, candidate_b, fit_conf = robust_affine_samples(source, target, weights, cfg)
 
                 prev_a, prev_b = scales[previous_index], offsets[previous_index]
                 if fit_conf <= 0:
@@ -479,18 +485,29 @@ class DepthSync:
                     reasons[i] = "insufficient_temporal_support"
                 else:
                     alpha = float(np.clip(cfg.parameter_smoothing * fit_conf, 0.0, 1.0))
+                    if cfg.mapping_mode == "lut":
+                        distance = abs(i - anchor_index)
+                        transition_span = max(cfg.anchor_transition_radius - cfg.anchor_lock_radius, 1)
+                        transition = np.clip(
+                            (distance - cfg.anchor_lock_radius) / transition_span,
+                            0.0,
+                            1.0,
+                        )
+                        alpha *= float(transition)
                     a = (1.0 - alpha) * prev_a + alpha * candidate_a
                     b = (1.0 - alpha) * prev_b + alpha * candidate_b
-                    a = float(np.clip(a, prev_a * (1.0 - cfg.max_scale_delta), prev_a * (1.0 + cfg.max_scale_delta)))
-                    max_offset_delta = cfg.max_offset_delta_fraction * max(photo_range, cfg.eps)
+                    scale_delta = cfg.lut_max_scale_delta if cfg.mapping_mode == "lut" else cfg.max_scale_delta
+                    offset_fraction = (
+                        cfg.lut_max_offset_delta_fraction
+                        if cfg.mapping_mode == "lut"
+                        else cfg.max_offset_delta_fraction
+                    )
+                    a = float(np.clip(a, prev_a * (1.0 - scale_delta), prev_a * (1.0 + scale_delta)))
+                    max_offset_delta = offset_fraction * max(photo_range, cfg.eps)
                     b = float(np.clip(b, prev_b - max_offset_delta, prev_b + max_offset_delta))
                     if cfg.mapping_mode == "lut":
-                        previous_y = _apply_lut(candidate_x, lut_x[previous_index], lut_y[previous_index], cfg.eps)
-                        current_x = candidate_x
-                        current_y = (1.0 - alpha) * previous_y + alpha * candidate_y
-                        max_node_delta = (cfg.max_scale_delta + cfg.max_offset_delta_fraction) * max(photo_range, cfg.eps)
-                        current_y = np.clip(current_y, previous_y - max_node_delta, previous_y + max_node_delta)
-                        current_y = _isotonic_increasing(current_y, np.ones_like(current_y))
+                        current_x = anchor_lut_x
+                        current_y = (a * anchor_lut_y + b).astype(np.float32)
                     else:
                         current_x, current_y = _affine_lut(source, a, b, cfg)
                 if abs(i - anchor_index) <= cfg.anchor_lock_radius:
@@ -521,7 +538,7 @@ class DepthSync:
                     field = None
                     if motion is not None:
                         field = motion.to_previous[i] if direction > 0 else motion.to_next[i]
-                    transported = _warp_residual_grid(transported, field)
+                    transported = _warp_residual_grid(transported, field, cfg.residual_motion_strength)
                     residual_grids[i] = transported * _residual_weight(distance, cfg.residual_radius)
 
         outputs: list[np.ndarray] = []

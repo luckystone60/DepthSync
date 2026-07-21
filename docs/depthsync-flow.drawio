@@ -52,13 +52,13 @@
         <mxCell id="correspond" value="block MV 建立稀疏对应&#xa;无 MV 时使用同位置采样" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=14;" vertex="1" parent="temporal-lane">
           <mxGeometry x="45" y="85" width="270" height="90" as="geometry" />
         </mxCell>
-        <mxCell id="frame-lut" value="逐帧候选 LUT&#xa;置信度平滑 + 节点变化限幅&#xa;失败时冻结上一帧" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=14;fontStyle=1;" vertex="1" parent="temporal-lane">
+        <mxCell id="frame-lut" value="固定锚帧 LUT 形状&#xa;逐帧只做小幅 affine 修正&#xa;锚点附近渐进解锁" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=14;fontStyle=1;" vertex="1" parent="temporal-lane">
           <mxGeometry x="380" y="75" width="300" height="105" as="geometry" />
         </mxCell>
-        <mxCell id="grid-warp" value="16×9 残差网格 warp&#xa;复用相同 block MV" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=14;" vertex="1" parent="temporal-lane">
+        <mxCell id="grid-warp" value="16×9 残差网格 warp&#xa;低强度复用 block MV" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=14;" vertex="1" parent="temporal-lane">
           <mxGeometry x="750" y="85" width="260" height="90" as="geometry" />
         </mxCell>
-        <mxCell id="decay" value="锚点距离权重&#xa;±15 帧内余弦衰减&#xa;范围外 residual = 0" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=14;fontStyle=1;" vertex="1" parent="temporal-lane">
+        <mxCell id="decay" value="锚点距离权重&#xa;±30 帧内余弦衰减&#xa;范围外 residual = 0" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=14;fontStyle=1;" vertex="1" parent="temporal-lane">
           <mxGeometry x="1080" y="75" width="260" height="105" as="geometry" />
         </mxCell>
         <mxCell id="table" value="逐帧参数表&#xa;8+8 个 LUT 值&#xa;16×9 residual" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=14;fontStyle=1;" vertex="1" parent="temporal-lane">
