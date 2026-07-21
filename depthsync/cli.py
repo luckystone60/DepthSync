@@ -29,6 +29,8 @@ def main() -> None:
         lut_x=result.lut_x,
         lut_y=result.lut_y,
         residual_grids=result.residual_grids,
+        static_mask=result.static_mask,
+        static_target_grid=result.static_target_grid,
         fallback_reasons=np.asarray(result.fallback_reasons),
     )
 

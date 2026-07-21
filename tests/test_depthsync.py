@@ -87,6 +87,28 @@ class DepthSyncTest(unittest.TestCase):
         replay = v3_sync.apply_frame(video[anchor], v3.parameters[anchor])
         np.testing.assert_allclose(replay, v3.depths[anchor], atol=1e-6)
 
+    def test_static_photo_guidance_removes_background_drift(self):
+        t, h, w, anchor = 9, 36, 48, 4
+        yy, xx = np.mgrid[:h, :w].astype(np.float32)
+        photo = 0.2 + 0.4 * xx / (w - 1) + 0.15 * yy / (h - 1)
+        video = np.stack([photo + 0.02 * (i - anchor) for i in range(t)])
+        fields = np.zeros((t, 6, 8, 2), np.float32)
+        confidence = np.ones((t, 6, 8), np.float32)
+        motion = MotionSequence(fields, fields.copy(), confidence, confidence.copy())
+        sync = DepthSync(
+            DepthSyncConfig(
+                min_fit_pixels=32,
+                sample_count=256,
+                residual_grid_shape=(9, 12),
+            )
+        )
+        result = sync.offline_prepare(video, photo, anchor, motion=motion)
+        self.assertGreater(float(np.mean(result.static_mask)), 0.9)
+        wall_median = np.median(result.depths[:, :, : w // 3], axis=(1, 2))
+        self.assertLess(float(np.ptp(wall_median)), 1e-4)
+        replay = sync.apply_frame(video[0], result.parameters[0])
+        np.testing.assert_allclose(replay, result.depths[0], atol=1e-6)
+
     def test_apply_frame_uses_only_scale_and_offset(self):
         depth = np.array([[1.0, 2.0]], np.float32)
         result = DepthSync().apply_frame(depth, FrameParameters(2.0, -0.5, 1.0))

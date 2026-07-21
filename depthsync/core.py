@@ -26,13 +26,19 @@ class DepthSyncConfig:
     mapping_mode: str = "lut"
     lut_nodes: int = 8
     residual_grid_shape: tuple[int, int] = (9, 16)
+    static_grid_shape: tuple[int, int] = (18, 32)
     residual_radius: int = 30
     residual_clip_fraction: float = 0.35
     residual_blur_sigma: float = 0.8
     anchor_transition_radius: int = 6
     lut_max_scale_delta: float = 0.01
     lut_max_offset_delta_fraction: float = 0.005
-    residual_motion_strength: float = 0.35
+    residual_motion_strength: float = 1.0
+    static_motion_threshold: float = 0.0025
+    static_motion_softness: float = 0.0005
+    static_depth_threshold_fraction: float = 0.10
+    static_depth_softness_fraction: float = 0.02
+    static_min_confidence: float = 0.30
     eps: float = 1e-6
 
 
@@ -60,6 +66,8 @@ class FrameParameters:
     lut_x: Optional[np.ndarray] = None
     lut_y: Optional[np.ndarray] = None
     residual_grid: Optional[np.ndarray] = None
+    static_mask: Optional[np.ndarray] = None
+    static_target_grid: Optional[np.ndarray] = None
 
 
 @dataclass
@@ -72,11 +80,16 @@ class SyncResult:
     lut_x: np.ndarray
     lut_y: np.ndarray
     residual_grids: np.ndarray
+    static_mask: np.ndarray
+    static_target_grid: np.ndarray
 
     @property
     def parameters(self) -> tuple[FrameParameters, ...]:
         return tuple(
-            FrameParameters(float(a), float(b), float(c), reason, x, y, residual)
+            FrameParameters(
+                float(a), float(b), float(c), reason, x, y, residual,
+                self.static_mask, self.static_target_grid,
+            )
             for a, b, c, reason, x, y, residual in zip(
                 self.scales,
                 self.offsets,
@@ -356,6 +369,61 @@ def _warp_residual_grid(
     return cv2.remap(grid, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE).astype(np.float32)
 
 
+def _static_guidance_mask(
+    motion: Optional[MotionSequence],
+    base_outputs: Sequence[np.ndarray],
+    photo_range: float,
+    grid_shape: tuple[int, int],
+    cfg: DepthSyncConfig,
+) -> np.ndarray:
+    """Estimate cells that are stable in both motion and relative depth."""
+    grid_h, grid_w = grid_shape
+    if motion is None or grid_h <= 0 or grid_w <= 0:
+        return np.zeros((max(grid_h, 0), max(grid_w, 0)), np.float32)
+    magnitudes: list[np.ndarray] = []
+    confidences: list[np.ndarray] = []
+    for index in range(1, len(motion.to_previous)):
+        field = motion.to_previous[index].astype(np.float32)
+        magnitude = np.linalg.norm(field, axis=-1)
+        magnitudes.append(cv2.resize(magnitude, (grid_w, grid_h), interpolation=cv2.INTER_AREA))
+        if motion.confidence_previous is not None:
+            confidences.append(
+                cv2.resize(
+                    motion.confidence_previous[index].astype(np.float32),
+                    (grid_w, grid_h),
+                    interpolation=cv2.INTER_AREA,
+                )
+            )
+    motion_p90 = np.quantile(np.stack(magnitudes), 0.90, axis=0)
+    stable = np.clip(
+        (cfg.static_motion_threshold - motion_p90) / max(cfg.static_motion_softness, cfg.eps),
+        0.0,
+        1.0,
+    ).astype(np.float32)
+
+    # Remove each frame's global median before measuring temporal depth change.
+    # This keeps genuinely static background eligible even when the lightweight
+    # depth model's global scale drifts, while rejecting independently moving
+    # subjects whose local depth changes relative to the scene.
+    low_depths = np.stack(
+        [cv2.resize(depth, (grid_w, grid_h), interpolation=cv2.INTER_AREA) for depth in base_outputs]
+    )
+    centered = low_depths - np.nanmedian(low_depths, axis=(1, 2), keepdims=True)
+    temporal_center = np.nanmedian(centered, axis=0)
+    temporal_mad = np.nanmedian(np.abs(centered - temporal_center), axis=0)
+    depth_threshold = cfg.static_depth_threshold_fraction * max(photo_range, cfg.eps)
+    depth_softness = cfg.static_depth_softness_fraction * max(photo_range, cfg.eps)
+    stable *= np.clip(
+        (depth_threshold - temporal_mad) / max(depth_softness, cfg.eps),
+        0.0,
+        1.0,
+    ).astype(np.float32)
+    if confidences:
+        confidence = np.median(np.stack(confidences), axis=0)
+        stable *= (confidence >= cfg.static_min_confidence).astype(np.float32)
+    return cv2.GaussianBlur(stable, (0, 0), 0.6).astype(np.float32)
+
+
 def _residual_weight(distance: int, radius: int) -> float:
     if radius <= 0 or distance >= radius:
         return 0.0
@@ -523,7 +591,18 @@ class DepthSync:
                 previous_index = i
 
         grid_h, grid_w = cfg.residual_grid_shape
+        static_grid_h, static_grid_w = cfg.static_grid_shape
         residual_grids = np.zeros((n, max(grid_h, 0), max(grid_w, 0)), np.float32)
+        concrete_base_outputs = [base for base in base_outputs if base is not None]
+        assert len(concrete_base_outputs) == n
+        static_mask = _static_guidance_mask(
+            motion, concrete_base_outputs, photo_range, (static_grid_h, static_grid_w), cfg
+        )
+        static_target_grid = (
+            cv2.resize(photo, (static_grid_w, static_grid_h), interpolation=cv2.INTER_AREA).astype(np.float32)
+            if static_grid_h > 0 and static_grid_w > 0
+            else np.zeros((0, 0), np.float32)
+        )
         if grid_h > 0 and grid_w > 0 and cfg.residual_radius > 0:
             anchor_base = base_outputs[anchor_index]
             assert anchor_base is not None
@@ -540,6 +619,13 @@ class DepthSync:
                         field = motion.to_previous[i] if direction > 0 else motion.to_next[i]
                     transported = _warp_residual_grid(transported, field, cfg.residual_motion_strength)
                     residual_grids[i] = transported * _residual_weight(distance, cfg.residual_radius)
+            # Static cells use a clip-global photo target below. Suppress the
+            # time-ramped residual there so the two corrections do not overlap.
+            if static_mask.size:
+                residual_static_mask = cv2.resize(
+                    static_mask, (grid_w, grid_h), interpolation=cv2.INTER_AREA
+                )
+                residual_grids *= 1.0 - residual_static_mask[None]
 
         outputs: list[np.ndarray] = []
         for base, residual_grid in zip(base_outputs, residual_grids):
@@ -547,6 +633,10 @@ class DepthSync:
             if residual_grid.size:
                 residual = cv2.resize(residual_grid, (shape[1], shape[0]), interpolation=cv2.INTER_LINEAR)
                 base = base + residual
+            if static_mask.size:
+                mask = cv2.resize(static_mask, (shape[1], shape[0]), interpolation=cv2.INTER_LINEAR)
+                target = cv2.resize(static_target_grid, (shape[1], shape[0]), interpolation=cv2.INTER_LINEAR)
+                base = (1.0 - mask) * base + mask * target
             outputs.append(base.astype(np.float32))
         depths = np.stack([_from_working(x, cfg.depth_mode, cfg.eps) for x in outputs]).astype(np.float32)
         return SyncResult(
@@ -558,6 +648,8 @@ class DepthSync:
             lut_x,
             lut_y,
             residual_grids,
+            static_mask,
+            static_target_grid,
         )
 
     def apply_frame(
@@ -578,6 +670,23 @@ class DepthSync:
                 interpolation=cv2.INTER_LINEAR,
             )
             synced = synced + residual
+        if (
+            params.static_mask is not None
+            and params.static_mask.size
+            and params.static_target_grid is not None
+            and params.static_target_grid.size
+        ):
+            mask = cv2.resize(
+                params.static_mask.astype(np.float32),
+                (working.shape[1], working.shape[0]),
+                interpolation=cv2.INTER_LINEAR,
+            )
+            target = cv2.resize(
+                params.static_target_grid.astype(np.float32),
+                (working.shape[1], working.shape[0]),
+                interpolation=cv2.INTER_LINEAR,
+            )
+            synced = (1.0 - mask) * synced + mask * target
         if output_shape is not None and synced.shape[:2] != output_shape:
             synced = _resize(synced, output_shape, self.cfg.high_res_interpolation)
         return _from_working(synced, self.cfg.depth_mode, self.cfg.eps).astype(np.float32)

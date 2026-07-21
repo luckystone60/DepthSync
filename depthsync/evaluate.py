@@ -128,6 +128,7 @@ def evaluate_scene(
     depth_root: Path,
     result_root: Path,
     face_box: tuple[float, float, float, float],
+    static_box: tuple[float, float, float, float] | None = None,
 ) -> dict[str, float | int | str]:
     clip_dir = clip_root / scene
     depth_dir = depth_root / scene
@@ -149,6 +150,7 @@ def evaluate_scene(
             depth_mode="disparity",
             mapping_mode="affine",
             residual_grid_shape=(0, 0),
+            static_grid_shape=(0, 0),
             residual_radius=0,
         )
     )
@@ -185,9 +187,27 @@ def evaluate_scene(
         "v3_prepare_ms_per_frame": v3_prepare_ms,
         "v1_apply_ms_per_frame": v1_apply_ms,
         "v3_apply_ms_per_frame": v3_apply_ms,
-        "v3_parameter_bytes": int(v3.lut_x.nbytes + v3.lut_y.nbytes + v3.residual_grids.nbytes),
+        "v3_parameter_bytes": int(
+            v3.lut_x.nbytes + v3.lut_y.nbytes + v3.residual_grids.nbytes
+            + v3.static_mask.nbytes + v3.static_target_grid.nbytes
+        ),
         "v3_fallback_frames": int(sum(bool(reason) for reason in v3.fallback_reasons)),
     }
+    if static_box is not None:
+        x0, y0, x1, y1 = static_box
+        ys = slice(int(y0 * video_depth.shape[1]), int(y1 * video_depth.shape[1]))
+        xs = slice(int(x0 * video_depth.shape[2]), int(x1 * video_depth.shape[2]))
+        photo_median = float(np.nanmedian(photo_low[ys, xs]))
+        v1_medians = np.nanmedian(v1.depths[:, ys, xs], axis=(1, 2))
+        v3_medians = np.nanmedian(v3.depths[:, ys, xs], axis=(1, 2))
+        metrics.update(
+            {
+                "static_photo_median": photo_median,
+                "v1_static_median_range": float(np.nanmax(v1_medians) - np.nanmin(v1_medians)),
+                "v3_static_median_range": float(np.nanmax(v3_medians) - np.nanmin(v3_medians)),
+                "v3_static_photo_bias": float(np.nanmedian(np.abs(v3_medians - photo_median))),
+            }
+        )
     np.savez_compressed(result_dir / "affine_depth.npz", disparity=v1.depths)
     np.savez_compressed(result_dir / "synced_depth.npz", disparity=v3.depths)
     np.savez_compressed(
@@ -203,6 +223,8 @@ def evaluate_scene(
         lut_x=v3.lut_x,
         lut_y=v3.lut_y,
         residual_grids=v3.residual_grids,
+        static_mask=v3.static_mask,
+        static_target_grid=v3.static_target_grid,
         fallback_reasons=np.asarray(v3.fallback_reasons),
     )
     with (result_dir / "parameters.csv").open("w", newline="", encoding="utf-8") as stream:
@@ -217,7 +239,7 @@ def evaluate_scene(
 def write_report(metrics: list[dict[str, float | int | str]], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
-        "# DepthSync V3.1 时域稳定性验证结果",
+        "# DepthSync V3.2 时域稳定性验证结果",
         "",
         "| 场景 | 锚帧 NMAE V1→V3 | 人脸切换 V1→V3 | 全局切换 V1→V3 | 时序 P95 V1→V3 | 最大新增跳变（帧） | V3 ms/帧 |",
         "|---|---:|---:|---:|---:|---:|---:|",
@@ -240,10 +262,16 @@ def write_report(metrics: list[dict[str, float | int | str]], path: Path) -> Non
             "- 锚点锁定结束后直接恢复高置信度更新，03 在锚点后的第 47 帧出现单帧参数跳变。",
             "- 旧版残差只在 ±15 帧衰减，权重变化和累计 MV 噪声进一步放大了相邻帧差异。",
             "- V3.1 固定锚帧 LUT 的非线性形状，逐帧只允许受限 affine 修正；锚点附近渐进解锁，并把残差衰减扩展到 ±30 帧。",
+            "- V3.2 将低运动、低相对深度变化区域识别为静态背景，播放时直接复用照片的 32×18 静态目标层，消除固定墙面的慢漂移；动态区域仍使用 V3.1 路径。",
+            "",
+            "## 01 左墙专项检查",
+            "",
+            f"- V1 墙面中位值全片范围：{metrics[0].get('v1_static_median_range', float('nan')):.4f}。",
+            f"- V3.2 墙面中位值全片范围：{metrics[0].get('v3_static_median_range', float('nan')):.4f}；相对 DepthPro 中位值偏差：{metrics[0].get('v3_static_photo_bias', float('nan')):.4f}。",
             "",
             "## 口径",
             "",
-            "- V1 是逐帧全局 affine；V3 固定锚帧 8 节点单调 LUT 的形状，只允许逐帧小幅 affine 修正，并叠加 16×9 残差网格。",
+            "- V1 是逐帧全局 affine；V3.2 固定锚帧 8 节点单调 LUT 的形状，只允许逐帧小幅 affine 修正，动态区域叠加 16×9 残差网格，静态区域使用全片共享的 32×18 照片目标层。",
             "- LUT 修正在锚点附近渐进解锁；残差通过稀疏 block MV 传播，在 ±30 帧内使用余弦权重衰减。",
             "- 时序指标是 block MV 补偿后的相邻帧中位差，P95 和最大新增跳变忽略首尾各 5 帧的流式模型启动/结束区。",
             "- 每段素材取中间 3 秒并统一为 30 fps / 90 帧，照片锚点为第 45 帧。",
@@ -266,7 +294,14 @@ def main() -> None:
     args = parser.parse_args()
     scene_config = json.loads(args.scene_config.read_text(encoding="utf-8"))
     metrics = [
-        evaluate_scene(scene, args.clip_root, args.depth_root, args.result_root, tuple(scene_config[scene]["face_box"]))
+        evaluate_scene(
+            scene,
+            args.clip_root,
+            args.depth_root,
+            args.result_root,
+            tuple(scene_config[scene]["face_box"]),
+            tuple(scene_config[scene]["static_box"]) if "static_box" in scene_config[scene] else None,
+        )
         for scene in args.scenes
     ]
     write_report(metrics, args.report)
