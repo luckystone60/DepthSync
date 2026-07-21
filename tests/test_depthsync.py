@@ -109,6 +109,31 @@ class DepthSyncTest(unittest.TestCase):
         replay = sync.apply_frame(video[0], result.parameters[0])
         np.testing.assert_allclose(replay, result.depths[0], atol=1e-6)
 
+    def test_isolated_static_confidence_hole_is_filled(self):
+        t, h, w = 7, 30, 40
+        yy, xx = np.mgrid[:h, :w].astype(np.float32)
+        photo = 0.2 + 0.3 * xx / (w - 1) + 0.1 * yy / (h - 1)
+        video = np.stack([photo + 0.01 * i for i in range(t)])
+        fields = np.zeros((t, 6, 8, 2), np.float32)
+        confidence = np.ones((t, 6, 8), np.float32)
+        confidence[:, 3, 4] = 0.0
+        config = DepthSyncConfig(
+            min_fit_pixels=32,
+            sample_count=256,
+            static_grid_shape=(6, 8),
+            static_close_radius=1,
+            static_erode_radius=0,
+            static_mask_blur_sigma=0.0,
+            static_edge_threshold_fraction=10.0,
+        )
+        result = DepthSync(config).offline_prepare(
+            video,
+            photo,
+            3,
+            motion=MotionSequence(fields, fields.copy(), confidence, confidence.copy()),
+        )
+        self.assertGreater(float(result.static_mask[3, 4]), 0.9)
+
     def test_apply_frame_uses_only_scale_and_offset(self):
         depth = np.array([[1.0, 2.0]], np.float32)
         result = DepthSync().apply_frame(depth, FrameParameters(2.0, -0.5, 1.0))

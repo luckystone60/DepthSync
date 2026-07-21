@@ -43,6 +43,8 @@ class DepthSyncConfig:
     static_edge_threshold_fraction: float = 1.50
     static_edge_softness_fraction: float = 0.15
     static_erode_radius: int = 1
+    static_close_radius: int = 2
+    static_mask_blur_sigma: float = 1.0
     correction_edge_kernel: int = 7
     correction_edge_threshold_fraction: float = 0.50
     correction_edge_softness_fraction: float = 0.10
@@ -424,11 +426,12 @@ def _static_guidance_mask(
     temporal_mad = np.nanmedian(np.abs(centered - temporal_center), axis=0)
     depth_threshold = cfg.static_depth_threshold_fraction * max(photo_range, cfg.eps)
     depth_softness = cfg.static_depth_softness_fraction * max(photo_range, cfg.eps)
-    stable *= np.clip(
+    depth_gate = np.clip(
         (depth_threshold - temporal_mad) / max(depth_softness, cfg.eps),
         0.0,
         1.0,
     ).astype(np.float32)
+    stable *= depth_gate
 
     # Median MAD misses an object that enters a background cell only near one
     # end of the clip (the 02 hair failure). A trimmed temporal range rejects
@@ -436,11 +439,12 @@ def _static_guidance_mask(
     temporal_range = np.nanquantile(centered, 0.95, axis=0) - np.nanquantile(centered, 0.05, axis=0)
     range_threshold = cfg.static_depth_range_fraction * max(photo_range, cfg.eps)
     range_softness = cfg.static_depth_range_softness_fraction * max(photo_range, cfg.eps)
-    stable *= np.clip(
+    occupancy_gate = np.clip(
         (range_threshold - temporal_range) / max(range_softness, cfg.eps),
         0.0,
         1.0,
     ).astype(np.float32)
+    stable *= occupancy_gate
 
     # A fixed photo target must never straddle a depth discontinuity: bilinear
     # mask upsampling would mix foreground and background into a visible halo.
@@ -451,7 +455,7 @@ def _static_guidance_mask(
     )
     edge_threshold = cfg.static_edge_threshold_fraction * max(photo_range, cfg.eps)
     edge_softness = cfg.static_edge_softness_fraction * max(photo_range, cfg.eps)
-    stable *= np.clip(
+    edge_gate = np.clip(
         (edge_threshold - gradient) / max(edge_softness, cfg.eps),
         0.0,
         1.0,
@@ -459,10 +463,22 @@ def _static_guidance_mask(
     if confidences:
         confidence = np.median(np.stack(confidences), axis=0)
         stable *= (confidence >= cfg.static_min_confidence).astype(np.float32)
+    # Fill isolated block-MV/confidence holes and low-pass the weight field.
+    # The occupancy and edge gates are re-applied afterwards, so smoothing a
+    # flat wall cannot leak the fixed photo layer back onto moving silhouettes.
+    if cfg.static_close_radius > 0:
+        radius = cfg.static_close_radius
+        stable = cv2.morphologyEx(
+            stable,
+            cv2.MORPH_CLOSE,
+            np.ones((2 * radius + 1, 2 * radius + 1), np.uint8),
+        )
+    if cfg.static_mask_blur_sigma > 0:
+        stable = cv2.GaussianBlur(stable, (0, 0), cfg.static_mask_blur_sigma)
     if cfg.static_erode_radius > 0:
         radius = cfg.static_erode_radius
-        stable = cv2.erode(stable, np.ones((2 * radius + 1, 2 * radius + 1), np.uint8))
-    return cv2.GaussianBlur(stable, (0, 0), 0.35).astype(np.float32)
+        edge_gate = cv2.erode(edge_gate, np.ones((2 * radius + 1, 2 * radius + 1), np.uint8))
+    return np.clip(stable * occupancy_gate * edge_gate, 0.0, 1.0).astype(np.float32)
 
 
 def _residual_weight(distance: int, radius: int) -> float:
