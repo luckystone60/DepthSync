@@ -100,13 +100,14 @@ def render_scene(scene: str, clip_root: Path, depth_root: Path, result_root: Pat
     output_dir = result_root / scene / "depth_visualization"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    rgb_frames, fps = _read_video(clip_dir / "clip.mp4")
     raw = np.load(depth_dir / "video_disparity.npz")["disparity"].astype(np.float32)
+    affine = np.load(result_root / scene / "affine_depth.npz")["disparity"].astype(np.float32)
     synced = np.load(result_root / scene / "synced_depth.npz")["disparity"].astype(np.float32)
     photo = np.load(depth_dir / "photo_disparity.npy").astype(np.float32)
     manifest = json.loads((clip_dir / "manifest.json").read_text(encoding="utf-8"))
     anchor = int(manifest["anchor_index"])
-    if len(rgb_frames) != len(raw) or len(raw) != len(synced):
+    fps = float(manifest["target_fps"])
+    if len(raw) != len(affine) or len(raw) != len(synced):
         raise ValueError(f"Frame count mismatch for scene {scene}")
 
     photo_low = cv2.resize(photo, (raw.shape[2], raw.shape[1]), interpolation=cv2.INTER_AREA)
@@ -116,23 +117,24 @@ def render_scene(scene: str, clip_root: Path, depth_root: Path, result_root: Pat
 
     _write_depth_video(output_dir / "vda_raw_color.mp4", raw, raw_limits, fps, True)
     _write_depth_video(output_dir / "vda_raw_gray.mp4", raw, raw_limits, fps, False)
+    _write_depth_video(output_dir / "affine_color.mp4", affine, photo_limits, fps, True)
+    _write_depth_video(output_dir / "affine_gray.mp4", affine, photo_limits, fps, False)
     _write_depth_video(output_dir / "depthsync_color.mp4", synced, synced_limits, fps, True)
     _write_depth_video(output_dir / "depthsync_gray.mp4", synced, synced_limits, fps, False)
 
     panel_size = (320, 180)
     photo_color = colorize_depth(photo_low, photo_limits)
-    comparison_size = (panel_size[0] * 5, panel_size[1] + 48)
+    comparison_size = (panel_size[0] * 4, panel_size[1] + 48)
     comparison_path = output_dir / "depth_comparison.mp4"
     writer = cv2.VideoWriter(str(comparison_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, comparison_size)
     if not writer.isOpened():
         raise ValueError(f"Cannot create video: {comparison_path}")
     anchor_comparison = None
-    for index, rgb in enumerate(rgb_frames):
+    for index in range(len(raw)):
         panels = [
-            _panel(rgb, f"RGB frame {index:02d}", panel_size, None),
-            _panel(colorize_depth(raw[index], raw_limits), "VDA raw / own range", panel_size, raw_limits),
-            _panel(colorize_depth(raw[index], photo_limits), "VDA raw / photo range", panel_size, photo_limits),
-            _panel(colorize_depth(synced[index], synced_limits), "DepthSync / photo range", panel_size, synced_limits),
+            _panel(colorize_depth(raw[index], photo_limits), f"VDA raw / shared range / {index:02d}", panel_size, photo_limits),
+            _panel(colorize_depth(affine[index], photo_limits), "V1 affine / shared range", panel_size, photo_limits),
+            _panel(colorize_depth(synced[index], synced_limits), "V3 LUT+grid / shared range", panel_size, synced_limits),
             _panel(photo_color, "DepthPro anchor / photo range", panel_size, photo_limits),
         ]
         frame = np.hstack(panels)
@@ -144,9 +146,11 @@ def render_scene(scene: str, clip_root: Path, depth_root: Path, result_root: Pat
         raise ValueError(f"Anchor frame {anchor} missing for scene {scene}")
 
     anchor_raw = colorize_depth(raw[anchor], raw_limits)
+    anchor_affine = colorize_depth(affine[anchor], photo_limits)
     anchor_synced = colorize_depth(synced[anchor], photo_limits)
     cv2.imwrite(str(output_dir / "anchor_comparison.png"), anchor_comparison)
     cv2.imwrite(str(output_dir / "anchor_vda_raw_color.png"), anchor_raw)
+    cv2.imwrite(str(output_dir / "anchor_affine_color.png"), anchor_affine)
     cv2.imwrite(str(output_dir / "anchor_depthsync_color.png"), anchor_synced)
     cv2.imwrite(str(output_dir / "anchor_depthpro_color.png"), photo_color)
     cv2.imwrite(str(output_dir / "anchor_depthsync_gray16.png"), depth_to_gray16(synced[anchor], photo_limits))
@@ -164,6 +168,8 @@ def render_scene(scene: str, clip_root: Path, depth_root: Path, result_root: Pat
             "comparison_video": "depth_comparison.mp4",
             "raw_color_video": "vda_raw_color.mp4",
             "raw_gray_video": "vda_raw_gray.mp4",
+            "affine_color_video": "affine_color.mp4",
+            "affine_gray_video": "affine_gray.mp4",
             "synced_color_video": "depthsync_color.mp4",
             "synced_gray_video": "depthsync_gray.mp4",
             "anchor_comparison": "anchor_comparison.png",

@@ -48,6 +48,42 @@ class DepthSyncTest(unittest.TestCase):
         self.assertEqual(result.fallback_reasons[1], "anchor_lock")
         self.assertEqual(result.fallback_reasons[3], "anchor_lock")
 
+    def test_v3_improves_nonlinear_and_spatial_anchor_alignment(self):
+        t, h, w, anchor = 7, 54, 80, 3
+        yy, xx = np.mgrid[:h, :w].astype(np.float32)
+        raw_anchor = 0.15 + 0.75 * xx / (w - 1) + 0.1 * yy / (h - 1)
+        video = np.stack([raw_anchor + 0.005 * (i - anchor) for i in range(t)])
+        spatial_bias = 0.10 * np.sin(2.0 * np.pi * xx / w) * np.cos(np.pi * yy / h)
+        photo = 0.25 + 0.7 * raw_anchor + 0.55 * raw_anchor**2 + spatial_bias
+        common = dict(depth_mode="disparity", min_fit_pixels=64, sample_count=1024)
+        affine = DepthSync(
+            DepthSyncConfig(
+                **common,
+                mapping_mode="affine",
+                residual_grid_shape=(0, 0),
+                residual_radius=0,
+            )
+        ).offline_prepare(video, photo, anchor)
+        v3_sync = DepthSync(
+            DepthSyncConfig(
+                **common,
+                mapping_mode="lut",
+                lut_nodes=8,
+                residual_grid_shape=(9, 16),
+                residual_radius=3,
+            )
+        )
+        v3 = v3_sync.offline_prepare(video, photo, anchor)
+        affine_error = float(np.median(np.abs(affine.depths[anchor] - photo)))
+        v3_error = float(np.median(np.abs(v3.depths[anchor] - photo)))
+        self.assertLess(v3_error, affine_error * 0.45)
+        self.assertTrue(np.all(np.diff(v3.lut_y, axis=1) >= -1e-6))
+        self.assertGreater(float(np.mean(np.abs(v3.residual_grids[anchor]))), 0.0)
+        self.assertGreater(float(np.mean(np.abs(v3.residual_grids[anchor - 1]))), 0.0)
+        self.assertEqual(float(np.max(np.abs(v3.residual_grids[anchor - 3]))), 0.0)
+        replay = v3_sync.apply_frame(video[anchor], v3.parameters[anchor])
+        np.testing.assert_allclose(replay, v3.depths[anchor], atol=1e-6)
+
     def test_apply_frame_uses_only_scale_and_offset(self):
         depth = np.array([[1.0, 2.0]], np.float32)
         result = DepthSync().apply_frame(depth, FrameParameters(2.0, -0.5, 1.0))

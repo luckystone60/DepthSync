@@ -23,6 +23,12 @@ class DepthSyncConfig:
     anchor_lock_radius: int = 1
     min_fit_pixels: int = 128
     high_res_interpolation: int = cv2.INTER_LINEAR
+    mapping_mode: str = "lut"
+    lut_nodes: int = 8
+    residual_grid_shape: tuple[int, int] = (9, 16)
+    residual_radius: int = 15
+    residual_clip_fraction: float = 0.35
+    residual_blur_sigma: float = 0.8
     eps: float = 1e-6
 
 
@@ -47,6 +53,9 @@ class FrameParameters:
     offset: float
     confidence: float
     fallback_reason: str = ""
+    lut_x: Optional[np.ndarray] = None
+    lut_y: Optional[np.ndarray] = None
+    residual_grid: Optional[np.ndarray] = None
 
 
 @dataclass
@@ -56,12 +65,23 @@ class SyncResult:
     offsets: np.ndarray
     confidences: np.ndarray
     fallback_reasons: tuple[str, ...]
+    lut_x: np.ndarray
+    lut_y: np.ndarray
+    residual_grids: np.ndarray
 
     @property
     def parameters(self) -> tuple[FrameParameters, ...]:
         return tuple(
-            FrameParameters(float(a), float(b), float(c), reason)
-            for a, b, c, reason in zip(self.scales, self.offsets, self.confidences, self.fallback_reasons)
+            FrameParameters(float(a), float(b), float(c), reason, x, y, residual)
+            for a, b, c, reason, x, y, residual in zip(
+                self.scales,
+                self.offsets,
+                self.confidences,
+                self.fallback_reasons,
+                self.lut_x,
+                self.lut_y,
+                self.residual_grids,
+            )
         )
 
 
@@ -139,6 +159,109 @@ def robust_affine(source: np.ndarray, target: np.ndarray, mask: np.ndarray, min_
     return robust_affine_samples(source[mask], target[mask], None, cfg)
 
 
+def _weighted_median(values: np.ndarray, weights: np.ndarray) -> float:
+    order = np.argsort(values)
+    ordered_values = values[order]
+    ordered_weights = weights[order]
+    cutoff = 0.5 * float(np.sum(ordered_weights))
+    index = min(int(np.searchsorted(np.cumsum(ordered_weights), cutoff, side="left")), len(values) - 1)
+    return float(ordered_values[index])
+
+
+def _isotonic_increasing(values: np.ndarray, weights: np.ndarray) -> np.ndarray:
+    """Small weighted pool-adjacent-violators solver for monotonic LUT nodes."""
+    block_values: list[float] = []
+    block_weights: list[float] = []
+    block_counts: list[int] = []
+    for value, weight in zip(values.astype(np.float64), weights.astype(np.float64)):
+        block_values.append(float(value))
+        block_weights.append(max(float(weight), 1e-9))
+        block_counts.append(1)
+        while len(block_values) >= 2 and block_values[-2] > block_values[-1]:
+            merged_weight = block_weights[-2] + block_weights[-1]
+            merged_value = (
+                block_values[-2] * block_weights[-2] + block_values[-1] * block_weights[-1]
+            ) / merged_weight
+            merged_count = block_counts[-2] + block_counts[-1]
+            block_values[-2:] = [merged_value]
+            block_weights[-2:] = [merged_weight]
+            block_counts[-2:] = [merged_count]
+    return np.concatenate(
+        [np.full(count, value, np.float64) for value, count in zip(block_values, block_counts)]
+    ).astype(np.float32)
+
+
+def _apply_lut(values: np.ndarray, lut_x: np.ndarray, lut_y: np.ndarray, eps: float) -> np.ndarray:
+    """Piecewise-linear LUT with linear endpoint extrapolation."""
+    source = values.astype(np.float32)
+    result = np.full(source.shape, np.nan, np.float32)
+    finite = np.isfinite(source)
+    if not np.any(finite):
+        return result
+    x = lut_x.astype(np.float32)
+    y = lut_y.astype(np.float32)
+    if len(x) < 2:
+        result[finite] = source[finite]
+        return result
+    samples = source[finite]
+    mapped = np.interp(samples, x, y).astype(np.float32)
+    left_slope = max(float((y[1] - y[0]) / max(x[1] - x[0], eps)), eps)
+    right_slope = max(float((y[-1] - y[-2]) / max(x[-1] - x[-2], eps)), eps)
+    left = samples < x[0]
+    right = samples > x[-1]
+    mapped[left] = y[0] + left_slope * (samples[left] - x[0])
+    mapped[right] = y[-1] + right_slope * (samples[right] - x[-1])
+    result[finite] = mapped
+    return result
+
+
+def robust_monotonic_lut_samples(
+    source: np.ndarray,
+    target: np.ndarray,
+    weights: Optional[np.ndarray],
+    cfg: DepthSyncConfig,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Fit a bounded monotonic mapping from paired samples using robust bins."""
+    good = np.isfinite(source) & np.isfinite(target)
+    if weights is not None:
+        good &= np.isfinite(weights) & (weights > 0)
+    x = source[good].astype(np.float64)
+    y = target[good].astype(np.float64)
+    w = np.ones_like(x) if weights is None else weights[good].astype(np.float64)
+    if x.size < cfg.min_fit_pixels or np.std(x) < cfg.eps:
+        return np.array([0.0, 1.0], np.float32), np.array([0.0, 1.0], np.float32), 0.0
+
+    # Remove gross mismatches using the same robust affine initializer as V1.
+    affine_a, affine_b, _ = robust_affine_samples(x, y, w, cfg)
+    residual = y - (affine_a * x + affine_b)
+    center = float(np.median(residual))
+    sigma = 1.4826 * float(np.median(np.abs(residual - center))) + cfg.eps
+    inlier = np.abs(residual - center) <= cfg.mad_threshold * sigma
+    x, y, w = x[inlier], y[inlier], w[inlier]
+    if x.size < cfg.min_fit_pixels:
+        lo, hi = np.quantile(source[good], (0.1, 0.9))
+        lut_x = np.array([lo, hi], np.float32)
+        return lut_x, (affine_a * lut_x + affine_b).astype(np.float32), 0.0
+
+    order = np.argsort(x)
+    groups = [group for group in np.array_split(order, min(cfg.lut_nodes, len(order))) if len(group)]
+    lut_x = np.array([_weighted_median(x[group], w[group]) for group in groups], np.float32)
+    lut_y = np.array([_weighted_median(y[group], w[group]) for group in groups], np.float32)
+    node_weights = np.array([float(np.sum(w[group])) for group in groups], np.float32)
+
+    keep = np.concatenate(([True], np.diff(lut_x) > cfg.eps))
+    lut_x, lut_y, node_weights = lut_x[keep], lut_y[keep], node_weights[keep]
+    if len(lut_x) < 2:
+        return np.array([0.0, 1.0], np.float32), np.array([0.0, 1.0], np.float32), 0.0
+    lut_y = _isotonic_increasing(lut_y, node_weights)
+    prediction = _apply_lut(x.astype(np.float32), lut_x, lut_y, cfg.eps)
+    target_range = float(np.quantile(y, 0.9) - np.quantile(y, 0.1)) + cfg.eps
+    residual_score = np.exp(-float(np.median(np.abs(y - prediction))) / (0.05 * target_range + cfg.eps))
+    coverage = min(1.0, float(x.size) / max(cfg.min_fit_pixels * 2, 1))
+    confidence = float(np.clip(residual_score * coverage * np.mean(np.clip(w, 0.0, 1.0)), 0.0, 1.0))
+    return lut_x, lut_y, confidence
+
+
 def _bilinear_sample(image: np.ndarray, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
     map_x = xs.astype(np.float32).reshape(-1, 1)
     map_y = ys.astype(np.float32).reshape(-1, 1)
@@ -198,11 +321,69 @@ def _align_photo(photo: np.ndarray, shape: tuple[int, int], photo_to_video_grid:
     return cv2.remap(photo, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=np.nan)
 
 
+def _make_residual_grid(residual: np.ndarray, photo_range: float, cfg: DepthSyncConfig) -> np.ndarray:
+    grid_h, grid_w = cfg.residual_grid_shape
+    if grid_h <= 0 or grid_w <= 0 or cfg.residual_radius <= 0:
+        return np.zeros((0, 0), np.float32)
+    finite = np.isfinite(residual)
+    if not np.any(finite):
+        return np.zeros((grid_h, grid_w), np.float32)
+    fill = float(np.median(residual[finite]))
+    cleaned = np.nan_to_num(residual, nan=fill, posinf=fill, neginf=fill).astype(np.float32)
+    limit = cfg.residual_clip_fraction * max(photo_range, cfg.eps)
+    cleaned = np.clip(cleaned, -limit, limit)
+    if cfg.residual_blur_sigma > 0:
+        cleaned = cv2.GaussianBlur(cleaned, (0, 0), cfg.residual_blur_sigma)
+    return cv2.resize(cleaned, (grid_w, grid_h), interpolation=cv2.INTER_AREA).astype(np.float32)
+
+
+def _warp_residual_grid(
+    grid: np.ndarray,
+    field: Optional[np.ndarray],
+) -> np.ndarray:
+    if grid.size == 0 or field is None:
+        return grid.copy()
+    grid_h, grid_w = grid.shape
+    dense = cv2.resize(field.astype(np.float32), (grid_w, grid_h), interpolation=cv2.INTER_LINEAR)
+    yy, xx = np.mgrid[:grid_h, :grid_w].astype(np.float32)
+    map_x = xx + dense[..., 0] * max(grid_w - 1, 1)
+    map_y = yy + dense[..., 1] * max(grid_h - 1, 1)
+    return cv2.remap(grid, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE).astype(np.float32)
+
+
+def _residual_weight(distance: int, radius: int) -> float:
+    if radius <= 0 or distance >= radius:
+        return 0.0
+    return float(0.5 * (1.0 + np.cos(np.pi * distance / radius)))
+
+
+def _canonical_lut(lut_x: np.ndarray, lut_y: np.ndarray, nodes: int, eps: float) -> tuple[np.ndarray, np.ndarray]:
+    if len(lut_x) < 2 or float(lut_x[-1] - lut_x[0]) <= eps:
+        x = np.linspace(0.0, 1.0, nodes, dtype=np.float32)
+        return x, x.copy()
+    x = np.linspace(float(lut_x[0]), float(lut_x[-1]), nodes, dtype=np.float32)
+    y = _apply_lut(x, lut_x, lut_y, eps)
+    return x, y
+
+
+def _affine_lut(source: np.ndarray, scale: float, offset: float, cfg: DepthSyncConfig) -> tuple[np.ndarray, np.ndarray]:
+    finite = source[np.isfinite(source)]
+    low, high = np.quantile(finite, (0.02, 0.98)) if finite.size else (0.0, 1.0)
+    if high <= low + cfg.eps:
+        high = low + 1.0
+    x = np.linspace(float(low), float(high), cfg.lut_nodes, dtype=np.float32)
+    return x, (scale * x + offset).astype(np.float32)
+
+
 class DepthSync:
-    """Estimate a tiny per-frame parameter table and apply it to video depth."""
+    """Estimate compact per-frame LUT and residual-grid parameters."""
 
     def __init__(self, config: Optional[DepthSyncConfig] = None):
         self.cfg = config or DepthSyncConfig()
+        if self.cfg.mapping_mode not in {"affine", "lut"}:
+            raise ValueError("mapping_mode must be 'affine' or 'lut'")
+        if self.cfg.lut_nodes < 2:
+            raise ValueError("lut_nodes must be at least 2")
 
     def offline_prepare(
         self,
@@ -224,28 +405,44 @@ class DepthSync:
         shape = video_depths[anchor_index].shape[:2]
         raw = [_resize(_to_working(d, cfg.depth_mode, cfg.eps), shape) for d in video_depths]
         photo = _align_photo(_to_working(photo_depth, cfg.depth_mode, cfg.eps), shape, photo_to_video_grid)
-        outputs: list[Optional[np.ndarray]] = [None] * n
+        base_outputs: list[Optional[np.ndarray]] = [None] * n
         scales, offsets, confidences = np.ones(n), np.zeros(n), np.zeros(n)
         reasons = [""] * n
+        lut_x = np.zeros((n, cfg.lut_nodes), np.float32)
+        lut_y = np.zeros_like(lut_x)
 
         xs, ys = _sample_coordinates(raw[anchor_index], cfg, face_box)
         anchor_source = _bilinear_sample(raw[anchor_index], xs, ys)
         anchor_target = _bilinear_sample(photo, xs, ys)
-        a, b, confidence = robust_affine_samples(anchor_source, anchor_target, None, cfg)
+        a, b, affine_confidence = robust_affine_samples(anchor_source, anchor_target, None, cfg)
+        anchor_lut_x, anchor_lut_y = _affine_lut(anchor_source, a, b, cfg)
+        confidence = affine_confidence
+        if cfg.mapping_mode == "lut":
+            candidate_x, candidate_y, lut_confidence = robust_monotonic_lut_samples(
+                anchor_source, anchor_target, None, cfg
+            )
+            if lut_confidence > 0:
+                anchor_lut_x, anchor_lut_y = _canonical_lut(
+                    candidate_x, candidate_y, cfg.lut_nodes, cfg.eps
+                )
+                confidence = lut_confidence
         if confidence <= 0:
             reasons[anchor_index] = "insufficient_anchor_support"
         scales[anchor_index], offsets[anchor_index], confidences[anchor_index] = a, b, confidence
-        outputs[anchor_index] = (a * raw[anchor_index] + b).astype(np.float32)
+        lut_x[anchor_index], lut_y[anchor_index] = anchor_lut_x, anchor_lut_y
+        if cfg.mapping_mode == "lut":
+            base_outputs[anchor_index] = _apply_lut(raw[anchor_index], anchor_lut_x, anchor_lut_y, cfg.eps)
+        else:
+            base_outputs[anchor_index] = (a * raw[anchor_index] + b).astype(np.float32)
         valid_photo = photo[np.isfinite(photo)]
         photo_range = float(np.quantile(valid_photo, 0.9) - np.quantile(valid_photo, 0.1)) if valid_photo.size else 1.0
 
         for direction in (-1, 1):
             previous_index = anchor_index
             for i in range(anchor_index + direction, -1 if direction < 0 else n, direction):
-                # The first neighbor on each side is fitted directly against the
-                # photo anchor. This protects the visible still/video switch;
-                # farther frames propagate from the previous synchronized map.
-                previous = photo if previous_index == anchor_index else outputs[previous_index]
+                # Global mapping propagates against the previous base map. The
+                # spatial photo residual travels separately to avoid double use.
+                previous = base_outputs[previous_index]
                 assert previous is not None
                 xs, ys = _sample_coordinates(raw[i], cfg, face_box)
                 source = _bilinear_sample(raw[i], xs, ys)
@@ -266,11 +463,19 @@ class DepthSync:
                 target = _bilinear_sample(previous, mapped_x, mapped_y)
                 in_bounds = (mapped_x >= 0) & (mapped_x < shape[1] - 1) & (mapped_y >= 0) & (mapped_y < shape[0] - 1)
                 weights *= in_bounds.astype(np.float32)
-                candidate_a, candidate_b, fit_conf = robust_affine_samples(source, target, weights, cfg)
+                candidate_a, candidate_b, affine_fit_conf = robust_affine_samples(source, target, weights, cfg)
+                candidate_x, candidate_y = _affine_lut(source, candidate_a, candidate_b, cfg)
+                fit_conf = affine_fit_conf
+                if cfg.mapping_mode == "lut":
+                    fitted_x, fitted_y, lut_fit_conf = robust_monotonic_lut_samples(source, target, weights, cfg)
+                    if lut_fit_conf > 0:
+                        candidate_x, candidate_y = _canonical_lut(fitted_x, fitted_y, cfg.lut_nodes, cfg.eps)
+                        fit_conf = lut_fit_conf
 
                 prev_a, prev_b = scales[previous_index], offsets[previous_index]
                 if fit_conf <= 0:
                     a, b = prev_a, prev_b
+                    current_x, current_y = lut_x[previous_index], lut_y[previous_index]
                     reasons[i] = "insufficient_temporal_support"
                 else:
                     alpha = float(np.clip(cfg.parameter_smoothing * fit_conf, 0.0, 1.0))
@@ -279,15 +484,64 @@ class DepthSync:
                     a = float(np.clip(a, prev_a * (1.0 - cfg.max_scale_delta), prev_a * (1.0 + cfg.max_scale_delta)))
                     max_offset_delta = cfg.max_offset_delta_fraction * max(photo_range, cfg.eps)
                     b = float(np.clip(b, prev_b - max_offset_delta, prev_b + max_offset_delta))
+                    if cfg.mapping_mode == "lut":
+                        previous_y = _apply_lut(candidate_x, lut_x[previous_index], lut_y[previous_index], cfg.eps)
+                        current_x = candidate_x
+                        current_y = (1.0 - alpha) * previous_y + alpha * candidate_y
+                        max_node_delta = (cfg.max_scale_delta + cfg.max_offset_delta_fraction) * max(photo_range, cfg.eps)
+                        current_y = np.clip(current_y, previous_y - max_node_delta, previous_y + max_node_delta)
+                        current_y = _isotonic_increasing(current_y, np.ones_like(current_y))
+                    else:
+                        current_x, current_y = _affine_lut(source, a, b, cfg)
                 if abs(i - anchor_index) <= cfg.anchor_lock_radius:
                     a, b = scales[anchor_index], offsets[anchor_index]
+                    current_x, current_y = lut_x[anchor_index], lut_y[anchor_index]
                     reasons[i] = "anchor_lock"
                 scales[i], offsets[i], confidences[i] = a, b, fit_conf
-                outputs[i] = (a * raw[i] + b).astype(np.float32)
+                lut_x[i], lut_y[i] = current_x, current_y
+                if cfg.mapping_mode == "lut":
+                    base_outputs[i] = _apply_lut(raw[i], current_x, current_y, cfg.eps)
+                else:
+                    base_outputs[i] = (a * raw[i] + b).astype(np.float32)
                 previous_index = i
 
+        grid_h, grid_w = cfg.residual_grid_shape
+        residual_grids = np.zeros((n, max(grid_h, 0), max(grid_w, 0)), np.float32)
+        if grid_h > 0 and grid_w > 0 and cfg.residual_radius > 0:
+            anchor_base = base_outputs[anchor_index]
+            assert anchor_base is not None
+            anchor_grid = _make_residual_grid(photo - anchor_base, photo_range, cfg)
+            residual_grids[anchor_index] = anchor_grid
+            for direction in (-1, 1):
+                transported = anchor_grid
+                for i in range(anchor_index + direction, -1 if direction < 0 else n, direction):
+                    distance = abs(i - anchor_index)
+                    if distance >= cfg.residual_radius:
+                        break
+                    field = None
+                    if motion is not None:
+                        field = motion.to_previous[i] if direction > 0 else motion.to_next[i]
+                    transported = _warp_residual_grid(transported, field)
+                    residual_grids[i] = transported * _residual_weight(distance, cfg.residual_radius)
+
+        outputs: list[np.ndarray] = []
+        for base, residual_grid in zip(base_outputs, residual_grids):
+            assert base is not None
+            if residual_grid.size:
+                residual = cv2.resize(residual_grid, (shape[1], shape[0]), interpolation=cv2.INTER_LINEAR)
+                base = base + residual
+            outputs.append(base.astype(np.float32))
         depths = np.stack([_from_working(x, cfg.depth_mode, cfg.eps) for x in outputs]).astype(np.float32)
-        return SyncResult(depths, scales.astype(np.float32), offsets.astype(np.float32), confidences.astype(np.float32), tuple(reasons))
+        return SyncResult(
+            depths,
+            scales.astype(np.float32),
+            offsets.astype(np.float32),
+            confidences.astype(np.float32),
+            tuple(reasons),
+            lut_x,
+            lut_y,
+            residual_grids,
+        )
 
     def apply_frame(
         self,
@@ -296,7 +550,17 @@ class DepthSync:
         output_shape: Optional[tuple[int, int]] = None,
     ) -> np.ndarray:
         working = _to_working(depth, self.cfg.depth_mode, self.cfg.eps)
-        synced = params.scale * working + params.offset
+        if self.cfg.mapping_mode == "lut" and params.lut_x is not None and params.lut_y is not None:
+            synced = _apply_lut(working, params.lut_x, params.lut_y, self.cfg.eps)
+        else:
+            synced = params.scale * working + params.offset
+        if params.residual_grid is not None and params.residual_grid.size:
+            residual = cv2.resize(
+                params.residual_grid.astype(np.float32),
+                (working.shape[1], working.shape[0]),
+                interpolation=cv2.INTER_LINEAR,
+            )
+            synced = synced + residual
         if output_shape is not None and synced.shape[:2] != output_shape:
             synced = _resize(synced, output_shape, self.cfg.high_res_interpolation)
         return _from_working(synced, self.cfg.depth_mode, self.cfg.eps).astype(np.float32)
