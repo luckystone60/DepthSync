@@ -84,6 +84,7 @@ class DepthSyncTest(unittest.TestCase):
         self.assertGreater(float(np.mean(np.abs(v3.residual_grids[anchor]))), 0.0)
         self.assertGreater(float(np.mean(np.abs(v3.residual_grids[anchor - 1]))), 0.0)
         self.assertEqual(float(np.max(np.abs(v3.residual_grids[anchor - 3]))), 0.0)
+        self.assertEqual(v3.static_mask.shape, (72, 128))
         self.assertEqual(v3.static_target_grid.shape, (72, 128))
         replay = v3_sync.apply_frame(video[anchor], v3.parameters[anchor])
         np.testing.assert_allclose(replay, v3.depths[anchor], atol=1e-6)
@@ -134,6 +135,30 @@ class DepthSyncTest(unittest.TestCase):
             motion=MotionSequence(fields, fields.copy(), confidence, confidence.copy()),
         )
         self.assertGreater(float(result.static_mask[3, 4]), 0.9)
+
+    def test_face_foreground_prior_remains_a_hard_static_barrier(self):
+        t, h, w = 7, 36, 48
+        photo = np.full((h, w), 0.2, np.float32)
+        photo[10:26, 18:33] = 0.9
+        video = np.repeat(photo[None], t, axis=0)
+        fields = np.zeros((t, 6, 8, 2), np.float32)
+        confidence = np.ones((t, 6, 8), np.float32)
+        config = DepthSyncConfig(
+            min_fit_pixels=32,
+            sample_count=256,
+            static_grid_shape=(18, 24),
+            static_target_shape=(18, 24),
+            static_mask_blur_sigma=0.0,
+        )
+        result = DepthSync(config).offline_prepare(
+            video,
+            photo,
+            3,
+            motion=MotionSequence(fields, fields.copy(), confidence, confidence.copy()),
+            face_box=(0.30, 0.15, 0.75, 0.85),
+        )
+        self.assertLess(float(np.max(result.static_mask[5:13, 9:16])), 1e-6)
+        self.assertGreater(float(np.mean(result.static_mask[:, :6])), 0.9)
 
     def test_apply_frame_uses_only_scale_and_offset(self):
         depth = np.array([[1.0, 2.0]], np.float32)

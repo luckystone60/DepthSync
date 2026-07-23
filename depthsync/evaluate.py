@@ -224,6 +224,32 @@ def evaluate_scene(
         metrics["v3_static_mask_laplacian_p95"] = float(
             np.nanquantile(np.abs(cv2.Laplacian(mask_inner, cv2.CV_32F)), 0.95)
         )
+        edge_errors: list[float] = []
+        fallback_widths: list[int] = []
+        edge_threshold = 0.01 * temporal_scale
+        for y in range(ys.start, ys.stop):
+            row_gradient = np.abs(np.diff(photo_low[y, xs]))
+            if row_gradient.size == 0:
+                continue
+            boundary = xs.start + int(np.argmax(row_gradient))
+            error = np.abs(v3.depths[anchor, y, xs.start:boundary] - photo_low[y, xs.start:boundary])
+            if error.size == 0:
+                continue
+            edge_errors.extend(error.tolist())
+            width = 0
+            for is_fallback in (error > edge_threshold)[::-1]:
+                if is_fallback:
+                    width += 1
+                elif width:
+                    break
+            fallback_widths.append(width)
+        metrics["v3_static_edge_mae"] = float(np.mean(edge_errors)) if edge_errors else float("nan")
+        metrics["v3_static_edge_p95"] = (
+            float(np.quantile(edge_errors, 0.95)) if edge_errors else float("nan")
+        )
+        metrics["v3_static_edge_fallback_width_median"] = (
+            float(np.median(fallback_widths)) if fallback_widths else float("nan")
+        )
     np.savez_compressed(result_dir / "affine_depth.npz", disparity=v1.depths)
     np.savez_compressed(result_dir / "synced_depth.npz", disparity=v3.depths)
     np.savez_compressed(
@@ -256,7 +282,7 @@ def evaluate_scene(
 def write_report(metrics: list[dict[str, float | int | str]], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
-        "# DepthSync V3.5 时域稳定性验证结果",
+        "# DepthSync V3.6 时域稳定性验证结果",
         "",
         "| 场景 | 锚帧 NMAE V1→V3 | 人脸切换 V1→V3 | 全局切换 V1→V3 | 时序 P95 V1→V3 | 最大新增跳变（帧） | V3 ms/帧 |",
         "|---|---:|---:|---:|---:|---:|---:|",
@@ -283,16 +309,18 @@ def write_report(metrics: list[dict[str, float | int | str]], path: Path) -> Non
             "- V3.3 增加时序范围门控、照片深度边缘腐蚀和逐帧深度边缘保护；静态层不再侵入人物轮廓，粗残差也不会跨前后景混合。",
             "- V3.4 对静态权重做小孔闭合与低通正则，再重新施加动态占用和深度边缘保护，消除 block MV 置信度孔洞在平面墙上形成的块状分层。",
             "- V3.5 将静态照片目标层提升到 128×72，并对 8-bit 对比视频使用固定亚 LSB 抖动；前者减少低分辨率目标层的分段插值，后者只消除可视化量化产生的伪轮廓，不改变浮点深度。",
+            "- V3.6 定位到墙边约 15 像素宽的回退带：静态照片层在深度边缘被关闭后重新露出尺度不同的视频基础深度。新版用扩展人脸区域内的近景先验保护人物，同时允许静态背景掩码完成到物体边界。",
             "",
             "## 01 左墙专项检查",
             "",
             f"- V1 墙面中位值全片范围：{metrics[0].get('v1_static_median_range', float('nan')):.4f}。",
-            f"- V3.5 墙面中位值全片范围：{metrics[0].get('v3_static_median_range', float('nan')):.4f}；相对 DepthPro 中位值偏差：{metrics[0].get('v3_static_photo_bias', float('nan')):.4f}。",
+            f"- V3.6 墙面中位值全片范围：{metrics[0].get('v3_static_median_range', float('nan')):.4f}；相对 DepthPro 中位值偏差：{metrics[0].get('v3_static_photo_bias', float('nan')):.4f}。",
             f"- 墙面静态权重 Laplacian P95：{metrics[0].get('v3_static_mask_laplacian_p95', float('nan')):.6f}（越低表示网格分层越弱）。",
+            f"- 墙边锚帧 MAE/P95：{metrics[0].get('v3_static_edge_mae', float('nan')):.6f} / {metrics[0].get('v3_static_edge_p95', float('nan')):.6f}；连续回退带中位宽度：{metrics[0].get('v3_static_edge_fallback_width_median', float('nan')):.1f} px。",
             "",
             "## 口径",
             "",
-            "- V1 是逐帧全局 affine；V3.5 固定锚帧 8 节点单调 LUT 的形状，只允许逐帧小幅 affine 修正，动态区域叠加 16×9 残差网格，静态区域使用 64×36 掩码和全片共享的 128×72 照片目标层。",
+            "- V1 是逐帧全局 affine；V3.6 固定锚帧 8 节点单调 LUT 的形状，只允许逐帧小幅 affine 修正，动态区域叠加 16×9 残差网格，静态区域使用 128×72 掩码和同分辨率照片目标层。",
             "- LUT 修正在锚点附近渐进解锁；残差通过稀疏 block MV 传播，在 ±30 帧内使用余弦权重衰减。",
             "- 时序指标是 block MV 补偿后的相邻帧中位差，P95 和最大新增跳变忽略首尾各 5 帧的流式模型启动/结束区。",
             "- 每段素材取中间 3 秒并统一为 30 fps / 90 帧，照片锚点为第 45 帧。",

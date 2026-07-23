@@ -26,7 +26,7 @@ class DepthSyncConfig:
     mapping_mode: str = "lut"
     lut_nodes: int = 8
     residual_grid_shape: tuple[int, int] = (9, 16)
-    static_grid_shape: tuple[int, int] = (36, 64)
+    static_grid_shape: tuple[int, int] = (72, 128)
     static_target_shape: tuple[int, int] = (72, 128)
     residual_radius: int = 30
     residual_clip_fraction: float = 0.35
@@ -41,12 +41,19 @@ class DepthSyncConfig:
     static_depth_softness_fraction: float = 0.02
     static_depth_range_fraction: float = 0.35
     static_depth_range_softness_fraction: float = 0.05
-    static_edge_threshold_fraction: float = 1.50
+    static_foreground_quantile: float = 0.85
+    static_foreground_softness_fraction: float = 0.05
+    static_face_expand_x: float = 0.20
+    static_face_expand_top: float = 0.20
+    static_face_expand_bottom: float = 0.50
+    static_edge_threshold_fraction: float = 0.0
     static_edge_softness_fraction: float = 0.15
-    static_erode_radius: int = 1
+    static_erode_radius: int = 0
     static_close_radius: int = 2
     static_mask_blur_sigma: float = 1.0
+    static_expand_radius: int = 2
     correction_edge_kernel: int = 7
+    static_correction_edge_kernel: int = 1
     correction_edge_threshold_fraction: float = 0.50
     correction_edge_softness_fraction: float = 0.10
     static_min_confidence: float = 0.30
@@ -389,6 +396,7 @@ def _static_guidance_mask(
     photo_range: float,
     grid_shape: tuple[int, int],
     cfg: DepthSyncConfig,
+    face_box: Optional[tuple[float, float, float, float]] = None,
 ) -> np.ndarray:
     """Estimate cells that are stable in both motion and relative depth."""
     grid_h, grid_w = grid_shape
@@ -447,25 +455,48 @@ def _static_guidance_mask(
     ).astype(np.float32)
     stable *= occupancy_gate
 
-    # A fixed photo target must never straddle a depth discontinuity: bilinear
-    # mask upsampling would mix foreground and background into a visible halo.
+    # Protect likely foreground only inside an expanded face ROI. Applying a
+    # generic depth-edge gate everywhere created a wide fallback band at the
+    # wall boundary, because the fixed photo layer was removed on both sides.
     photo_grid = cv2.resize(photo, (grid_w, grid_h), interpolation=cv2.INTER_AREA)
-    gradient = np.hypot(
-        cv2.Sobel(photo_grid, cv2.CV_32F, 1, 0, ksize=3),
-        cv2.Sobel(photo_grid, cv2.CV_32F, 0, 1, ksize=3),
-    )
-    edge_threshold = cfg.static_edge_threshold_fraction * max(photo_range, cfg.eps)
-    edge_softness = cfg.static_edge_softness_fraction * max(photo_range, cfg.eps)
-    edge_gate = np.clip(
-        (edge_threshold - gradient) / max(edge_softness, cfg.eps),
-        0.0,
-        1.0,
-    ).astype(np.float32)
+    finite_photo = photo_grid[np.isfinite(photo_grid)]
+    foreground_gate = np.ones((grid_h, grid_w), np.float32)
+    if finite_photo.size and face_box is not None and 0.0 < cfg.static_foreground_quantile < 1.0:
+        foreground_threshold = float(np.quantile(finite_photo, cfg.static_foreground_quantile))
+        foreground_softness = cfg.static_foreground_softness_fraction * max(photo_range, cfg.eps)
+        candidate_gate = np.clip(
+            (foreground_threshold + foreground_softness - photo_grid)
+            / max(foreground_softness, cfg.eps),
+            0.0,
+            1.0,
+        ).astype(np.float32)
+        x0, y0, x1, y1 = face_box
+        x0 = max(x0 - cfg.static_face_expand_x, 0.0)
+        x1 = min(x1 + cfg.static_face_expand_x, 1.0)
+        y0 = max(y0 - cfg.static_face_expand_top, 0.0)
+        y1 = min(y1 + cfg.static_face_expand_bottom, 1.0)
+        xs = slice(int(x0 * grid_w), max(int(np.ceil(x1 * grid_w)), 1))
+        ys = slice(int(y0 * grid_h), max(int(np.ceil(y1 * grid_h)), 1))
+        foreground_gate[ys, xs] = candidate_gate[ys, xs]
+
+    edge_gate = np.ones((grid_h, grid_w), np.float32)
+    if cfg.static_edge_threshold_fraction > 0:
+        gradient = np.hypot(
+            cv2.Sobel(photo_grid, cv2.CV_32F, 1, 0, ksize=3),
+            cv2.Sobel(photo_grid, cv2.CV_32F, 0, 1, ksize=3),
+        )
+        edge_threshold = cfg.static_edge_threshold_fraction * max(photo_range, cfg.eps)
+        edge_softness = cfg.static_edge_softness_fraction * max(photo_range, cfg.eps)
+        edge_gate = np.clip(
+            (edge_threshold - gradient) / max(edge_softness, cfg.eps),
+            0.0,
+            1.0,
+        ).astype(np.float32)
     if confidences:
         confidence = np.median(np.stack(confidences), axis=0)
         stable *= (confidence >= cfg.static_min_confidence).astype(np.float32)
     # Fill isolated block-MV/confidence holes and low-pass the weight field.
-    # The occupancy and edge gates are re-applied afterwards, so smoothing a
+    # Occupancy and foreground gates are re-applied afterwards, so smoothing a
     # flat wall cannot leak the fixed photo layer back onto moving silhouettes.
     if cfg.static_close_radius > 0:
         radius = cfg.static_close_radius
@@ -479,7 +510,21 @@ def _static_guidance_mask(
     if cfg.static_erode_radius > 0:
         radius = cfg.static_erode_radius
         edge_gate = cv2.erode(edge_gate, np.ones((2 * radius + 1, 2 * radius + 1), np.uint8))
-    return np.clip(stable * occupancy_gate * edge_gate, 0.0, 1.0).astype(np.float32)
+    static_mask = np.clip(
+        stable * occupancy_gate * foreground_gate * edge_gate,
+        0.0,
+        1.0,
+    ).astype(np.float32)
+    if cfg.static_expand_radius > 0:
+        radius = cfg.static_expand_radius
+        static_mask = cv2.dilate(
+            static_mask,
+            np.ones((2 * radius + 1, 2 * radius + 1), np.uint8),
+        )
+        # The expanded-face foreground prior remains a hard barrier, while
+        # background motion/depth holes may be completed up to their boundary.
+        static_mask *= foreground_gate
+    return np.clip(static_mask, 0.0, 1.0).astype(np.float32)
 
 
 def _residual_weight(distance: int, radius: int) -> float:
@@ -488,9 +533,14 @@ def _residual_weight(distance: int, radius: int) -> float:
     return float(0.5 * (1.0 + np.cos(np.pi * distance / radius)))
 
 
-def _correction_edge_guard(base: np.ndarray, guidance_range: float, cfg: DepthSyncConfig) -> np.ndarray:
+def _correction_edge_guard(
+    base: np.ndarray,
+    guidance_range: float,
+    cfg: DepthSyncConfig,
+    kernel_size: Optional[int] = None,
+) -> np.ndarray:
     """Suppress coarse corrections around foreground/background discontinuities."""
-    kernel_size = max(int(cfg.correction_edge_kernel) | 1, 1)
+    kernel_size = max(int(cfg.correction_edge_kernel if kernel_size is None else kernel_size) | 1, 1)
     if kernel_size <= 1 or guidance_range <= cfg.eps:
         return np.ones(base.shape, np.float32)
     kernel = np.ones((kernel_size, kernel_size), np.uint8)
@@ -670,7 +720,13 @@ class DepthSync:
         concrete_base_outputs = [base for base in base_outputs if base is not None]
         assert len(concrete_base_outputs) == n
         static_mask = _static_guidance_mask(
-            motion, concrete_base_outputs, photo, photo_range, (static_grid_h, static_grid_w), cfg
+            motion,
+            concrete_base_outputs,
+            photo,
+            photo_range,
+            (static_grid_h, static_grid_w),
+            cfg,
+            face_box,
         )
         static_target_grid = (
             cv2.resize(photo, (target_grid_w, target_grid_h), interpolation=cv2.INTER_AREA).astype(np.float32)
@@ -711,7 +767,10 @@ class DepthSync:
             if static_mask.size:
                 mask = cv2.resize(static_mask, (shape[1], shape[0]), interpolation=cv2.INTER_LINEAR)
                 target = cv2.resize(static_target_grid, (shape[1], shape[0]), interpolation=cv2.INTER_LINEAR)
-                mask *= edge_guard
+                if cfg.static_correction_edge_kernel > 1:
+                    mask *= _correction_edge_guard(
+                        base, photo_range, cfg, cfg.static_correction_edge_kernel
+                    )
                 base = (1.0 - mask) * base + mask * target
             outputs.append(base.astype(np.float32))
         depths = np.stack([_from_working(x, cfg.depth_mode, cfg.eps) for x in outputs]).astype(np.float32)
@@ -759,7 +818,13 @@ class DepthSync:
                 (working.shape[1], working.shape[0]),
                 interpolation=cv2.INTER_LINEAR,
             )
-            mask *= edge_guard
+            if self.cfg.static_correction_edge_kernel > 1:
+                mask *= _correction_edge_guard(
+                    synced,
+                    params.guidance_range,
+                    self.cfg,
+                    self.cfg.static_correction_edge_kernel,
+                )
             target = cv2.resize(
                 params.static_target_grid.astype(np.float32),
                 (working.shape[1], working.shape[0]),

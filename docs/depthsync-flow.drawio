@@ -1,11 +1,11 @@
 <mxfile host="Electron" agent="Codex" version="24.7.17">
-  <diagram id="depthsync-v35" name="DepthSync V3.5 端侧流程">
+  <diagram id="depthsync-v36" name="DepthSync V3.6 端侧流程">
     <mxGraphModel dx="1800" dy="1400" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1400" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
 
-        <mxCell id="title" value="DepthSync V3.5：照片锚点引导的端侧深度序列同步" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=24;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="title" value="DepthSync V3.6：人物强保护 + 静态背景完成到边界" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=24;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="250" y="20" width="1300" height="40" as="geometry" />
         </mxCell>
         <mxCell id="subtitle" value="参数准备阶段：拍摄后后台执行　｜　播放阶段：无额外模型、无稠密光流" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=14;fontColor=#666666;" vertex="1" parent="1">
@@ -56,19 +56,19 @@
         <mxCell id="static-lane" value="C. 静态背景与边缘安全引导" style="swimlane;html=1;startSize=34;rounded=1;fillColor=#F3ECF7;strokeColor=#9673A6;fontStyle=1;fontSize=15;" vertex="1" parent="1">
           <mxGeometry x="40" y="570" width="1720" height="250" as="geometry" />
         </mxCell>
-        <mxCell id="motion-gate" value="运动稳定门控（64×36）&#xa;block MV 幅值 P90&#xa;MV confidence ≥ 0.30" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=13;" vertex="1" parent="static-lane">
+        <mxCell id="motion-gate" value="运动稳定门控（128×72）&#xa;block MV 幅值 P90&#xa;MV confidence ≥ 0.30" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=13;" vertex="1" parent="static-lane">
           <mxGeometry x="35" y="75" width="250" height="105" as="geometry" />
         </mxCell>
         <mxCell id="depth-gate" value="相对深度稳定门控&#xa;去全局中位值后的 MAD&#xa;5%–95% 时序范围&#xa;排除片尾新进入的人物/头发" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=13;" vertex="1" parent="static-lane">
           <mxGeometry x="325" y="65" width="285" height="125" as="geometry" />
         </mxCell>
-        <mxCell id="photo-edge" value="照片深度边缘门控&#xa;Sobel 梯度 + 1 单元腐蚀&#xa;禁止照片层跨越前后景" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=13;" vertex="1" parent="static-lane">
+        <mxCell id="photo-edge" value="人物近景硬屏障&#xa;扩展人脸 ROI&#xa;照片 disparity &gt; P85&#xa;防止照片层进入人物/头发" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=13;" vertex="1" parent="static-lane">
           <mxGeometry x="650" y="75" width="260" height="105" as="geometry" />
         </mxCell>
-        <mxCell id="mask-regularize" value="平面权重正则&#xa;5×5 闭运算填孔&#xa;σ=1.0 低通&#xa;重新施加占用与边缘门控" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=13;fontStyle=1;" vertex="1" parent="static-lane">
+        <mxCell id="mask-regularize" value="背景掩码正则与完成&#xa;5×5 闭运算 + σ=1.0 低通&#xa;向背景边界完成 2 单元&#xa;重新施加人物硬屏障" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=13;fontStyle=1;" vertex="1" parent="static-lane">
           <mxGeometry x="950" y="65" width="275" height="125" as="geometry" />
         </mxCell>
-        <mxCell id="static-mask" value="静态软掩码 M&#xa;64×36&#xa;全片共享" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;fontStyle=1;" vertex="1" parent="static-lane">
+        <mxCell id="static-mask" value="静态背景软掩码 M&#xa;128×72&#xa;人物硬屏障、背景覆盖到边界" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;fontStyle=1;" vertex="1" parent="static-lane">
           <mxGeometry x="1270" y="80" width="180" height="95" as="geometry" />
         </mxCell>
         <mxCell id="static-target" value="照片目标层 S&#xa;128×72&#xa;全片共享；减少平面分段插值" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;fontStyle=1;" vertex="1" parent="static-lane">
@@ -81,13 +81,13 @@
         <mxCell id="frame-package" value="逐帧参数（T=90）&#xa;LUT x/y：90×8×2&#xa;残差：90×9×16" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=13;fontStyle=1;" vertex="1" parent="package-lane">
           <mxGeometry x="110" y="55" width="330" height="85" as="geometry" />
         </mxCell>
-        <mxCell id="clip-package" value="全片共享参数&#xa;M：36×64　S：72×128&#xa;guidance range + 版本/量化信息" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;fontStyle=1;" vertex="1" parent="package-lane">
+        <mxCell id="clip-package" value="全片共享参数&#xa;M：72×128　S：72×128&#xa;guidance range + 版本/量化信息" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;fontStyle=1;" vertex="1" parent="package-lane">
           <mxGeometry x="530" y="50" width="370" height="95" as="geometry" />
         </mxCell>
-        <mxCell id="prototype-size" value="FP32 原型&#xa;约 101.3 KiB / 90 帧" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=13;" vertex="1" parent="package-lane">
+        <mxCell id="prototype-size" value="FP32 原型&#xa;约 128.3 KiB / 90 帧" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=13;" vertex="1" parent="package-lane">
           <mxGeometry x="1020" y="55" width="240" height="85" as="geometry" />
         </mxCell>
-        <mxCell id="device-size" value="推荐端侧&#xa;LUT/残差/目标 FP16 + 掩码 U8&#xa;约 49–51 KiB / Live Photo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=13;fontStyle=1;" vertex="1" parent="package-lane">
+        <mxCell id="device-size" value="推荐端侧&#xa;LUT/残差/目标 FP16 + 掩码 U8&#xa;约 56–58 KiB / Live Photo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=13;fontStyle=1;" vertex="1" parent="package-lane">
           <mxGeometry x="1340" y="50" width="300" height="95" as="geometry" />
         </mxCell>
 
@@ -97,13 +97,13 @@
         <mxCell id="runtime-lut" value="① 8 节点 LUT&#xa;Bi = Li(Di)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;fontStyle=1;" vertex="1" parent="runtime-lane">
           <mxGeometry x="40" y="80" width="210" height="90" as="geometry" />
         </mxCell>
-        <mxCell id="edge-guard" value="② 7×7 形态学梯度&#xa;可分离 max/min&#xa;得到边缘保护 Ei" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=13;fontStyle=1;" vertex="1" parent="runtime-lane">
+        <mxCell id="edge-guard" value="② 7×7 形态学梯度&#xa;可分离 max/min&#xa;仅保护动态残差 Ei" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=13;fontStyle=1;" vertex="1" parent="runtime-lane">
           <mxGeometry x="290" y="70" width="250" height="105" as="geometry" />
         </mxCell>
         <mxCell id="runtime-residual" value="③ 动态残差&#xa;Ddyn = Bi + Ei·upsample(Ri)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=13;" vertex="1" parent="runtime-lane">
           <mxGeometry x="585" y="75" width="270" height="95" as="geometry" />
         </mxCell>
-        <mxCell id="runtime-static" value="④ 静态照片软融合&#xa;W = upsample(M)·Ei&#xa;Yi=(1-W)Ddyn+W·upsample(S)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=13;fontStyle=1;" vertex="1" parent="runtime-lane">
+        <mxCell id="runtime-static" value="④ 静态照片软融合&#xa;W = upsample(M)&#xa;Yi=(1-W)Ddyn+W·upsample(S)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=13;fontStyle=1;" vertex="1" parent="runtime-lane">
           <mxGeometry x="900" y="65" width="310" height="115" as="geometry" />
         </mxCell>
         <mxCell id="runtime-output" value="⑤ 同步深度 Yi&#xa;照片尺度一致&#xa;静态平面稳定、动态边缘受保护" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=13;fontStyle=1;" vertex="1" parent="runtime-lane">
