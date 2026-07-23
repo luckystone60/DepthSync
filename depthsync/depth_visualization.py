@@ -26,7 +26,20 @@ def normalize_depth(depth: np.ndarray, limits: tuple[float, float]) -> np.ndarra
 
 
 def colorize_depth(depth: np.ndarray, limits: tuple[float, float]) -> np.ndarray:
-    gray = (normalize_depth(depth, limits) * 255.0).round().astype(np.uint8)
+    normalized = normalize_depth(depth, limits)
+    # Ordered sub-LSB dither prevents false contouring on large smooth planes
+    # after 8-bit Turbo quantization and MP4 encoding. The pattern is fixed, so
+    # it does not introduce temporal noise into the comparison video.
+    bayer4 = np.asarray(
+        [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]],
+        np.float32,
+    )
+    dither = (bayer4 - 7.5) / (16.0 * 255.0)
+    tiled = np.tile(
+        dither,
+        ((normalized.shape[0] + 3) // 4, (normalized.shape[1] + 3) // 4),
+    )[: normalized.shape[0], : normalized.shape[1]]
+    gray = (np.clip(normalized + tiled, 0.0, 1.0) * 255.0).round().astype(np.uint8)
     return cv2.applyColorMap(gray, cv2.COLORMAP_TURBO)
 
 
@@ -137,7 +150,7 @@ def render_scene(scene: str, clip_root: Path, depth_root: Path, result_root: Pat
         panels = [
             _panel(colorize_depth(raw[index], photo_limits), f"VDA raw / shared range / {index:02d}", panel_size, photo_limits),
             _panel(colorize_depth(affine[index], photo_limits), "V1 affine / shared range", panel_size, photo_limits),
-            _panel(colorize_depth(synced[index], synced_limits), "V3.4 smooth static guidance", panel_size, synced_limits),
+            _panel(colorize_depth(synced[index], synced_limits), "V3.5 smooth-plane guidance", panel_size, synced_limits),
             _panel(photo_color, "DepthPro anchor / photo range", panel_size, photo_limits),
         ]
         frame = np.hstack(panels)

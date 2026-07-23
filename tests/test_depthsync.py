@@ -84,6 +84,7 @@ class DepthSyncTest(unittest.TestCase):
         self.assertGreater(float(np.mean(np.abs(v3.residual_grids[anchor]))), 0.0)
         self.assertGreater(float(np.mean(np.abs(v3.residual_grids[anchor - 1]))), 0.0)
         self.assertEqual(float(np.max(np.abs(v3.residual_grids[anchor - 3]))), 0.0)
+        self.assertEqual(v3.static_target_grid.shape, (72, 128))
         replay = v3_sync.apply_frame(video[anchor], v3.parameters[anchor])
         np.testing.assert_allclose(replay, v3.depths[anchor], atol=1e-6)
 

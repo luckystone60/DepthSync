@@ -27,6 +27,7 @@ class DepthSyncConfig:
     lut_nodes: int = 8
     residual_grid_shape: tuple[int, int] = (9, 16)
     static_grid_shape: tuple[int, int] = (36, 64)
+    static_target_shape: tuple[int, int] = (72, 128)
     residual_radius: int = 30
     residual_clip_fraction: float = 0.35
     residual_blur_sigma: float = 0.8
@@ -664,6 +665,7 @@ class DepthSync:
 
         grid_h, grid_w = cfg.residual_grid_shape
         static_grid_h, static_grid_w = cfg.static_grid_shape
+        target_grid_h, target_grid_w = cfg.static_target_shape
         residual_grids = np.zeros((n, max(grid_h, 0), max(grid_w, 0)), np.float32)
         concrete_base_outputs = [base for base in base_outputs if base is not None]
         assert len(concrete_base_outputs) == n
@@ -671,8 +673,8 @@ class DepthSync:
             motion, concrete_base_outputs, photo, photo_range, (static_grid_h, static_grid_w), cfg
         )
         static_target_grid = (
-            cv2.resize(photo, (static_grid_w, static_grid_h), interpolation=cv2.INTER_AREA).astype(np.float32)
-            if static_grid_h > 0 and static_grid_w > 0
+            cv2.resize(photo, (target_grid_w, target_grid_h), interpolation=cv2.INTER_AREA).astype(np.float32)
+            if static_grid_h > 0 and static_grid_w > 0 and target_grid_h > 0 and target_grid_w > 0
             else np.zeros((0, 0), np.float32)
         )
         if grid_h > 0 and grid_w > 0 and cfg.residual_radius > 0:

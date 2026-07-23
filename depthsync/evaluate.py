@@ -151,6 +151,7 @@ def evaluate_scene(
             mapping_mode="affine",
             residual_grid_shape=(0, 0),
             static_grid_shape=(0, 0),
+            static_target_shape=(0, 0),
             residual_radius=0,
         )
     )
@@ -255,7 +256,7 @@ def evaluate_scene(
 def write_report(metrics: list[dict[str, float | int | str]], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
-        "# DepthSync V3.4 时域稳定性验证结果",
+        "# DepthSync V3.5 时域稳定性验证结果",
         "",
         "| 场景 | 锚帧 NMAE V1→V3 | 人脸切换 V1→V3 | 全局切换 V1→V3 | 时序 P95 V1→V3 | 最大新增跳变（帧） | V3 ms/帧 |",
         "|---|---:|---:|---:|---:|---:|---:|",
@@ -281,16 +282,17 @@ def write_report(metrics: list[dict[str, float | int | str]], path: Path) -> Non
             "- V3.2 将低运动、低相对深度变化区域识别为静态背景，播放时直接复用照片的 32×18 静态目标层，消除固定墙面的慢漂移；动态区域仍使用 V3.1 路径。",
             "- V3.3 增加时序范围门控、照片深度边缘腐蚀和逐帧深度边缘保护；静态层不再侵入人物轮廓，粗残差也不会跨前后景混合。",
             "- V3.4 对静态权重做小孔闭合与低通正则，再重新施加动态占用和深度边缘保护，消除 block MV 置信度孔洞在平面墙上形成的块状分层。",
+            "- V3.5 将静态照片目标层提升到 128×72，并对 8-bit 对比视频使用固定亚 LSB 抖动；前者减少低分辨率目标层的分段插值，后者只消除可视化量化产生的伪轮廓，不改变浮点深度。",
             "",
             "## 01 左墙专项检查",
             "",
             f"- V1 墙面中位值全片范围：{metrics[0].get('v1_static_median_range', float('nan')):.4f}。",
-            f"- V3.4 墙面中位值全片范围：{metrics[0].get('v3_static_median_range', float('nan')):.4f}；相对 DepthPro 中位值偏差：{metrics[0].get('v3_static_photo_bias', float('nan')):.4f}。",
+            f"- V3.5 墙面中位值全片范围：{metrics[0].get('v3_static_median_range', float('nan')):.4f}；相对 DepthPro 中位值偏差：{metrics[0].get('v3_static_photo_bias', float('nan')):.4f}。",
             f"- 墙面静态权重 Laplacian P95：{metrics[0].get('v3_static_mask_laplacian_p95', float('nan')):.6f}（越低表示网格分层越弱）。",
             "",
             "## 口径",
             "",
-            "- V1 是逐帧全局 affine；V3.4 固定锚帧 8 节点单调 LUT 的形状，只允许逐帧小幅 affine 修正，动态区域叠加 16×9 残差网格，静态区域使用全片共享的 64×36 照片目标层。",
+            "- V1 是逐帧全局 affine；V3.5 固定锚帧 8 节点单调 LUT 的形状，只允许逐帧小幅 affine 修正，动态区域叠加 16×9 残差网格，静态区域使用 64×36 掩码和全片共享的 128×72 照片目标层。",
             "- LUT 修正在锚点附近渐进解锁；残差通过稀疏 block MV 传播，在 ±30 帧内使用余弦权重衰减。",
             "- 时序指标是 block MV 补偿后的相邻帧中位差，P95 和最大新增跳变忽略首尾各 5 帧的流式模型启动/结束区。",
             "- 每段素材取中间 3 秒并统一为 30 fps / 90 帧，照片锚点为第 45 帧。",
