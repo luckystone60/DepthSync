@@ -41,6 +41,12 @@ class DepthSyncConfig:
     static_depth_softness_fraction: float = 0.02
     static_depth_range_fraction: float = 0.35
     static_depth_range_softness_fraction: float = 0.05
+    static_temporal_median_radius: int = 1
+    static_occupancy_barrier_threshold: float = 0.50
+    static_occupancy_barrier_radius: int = 2
+    static_subject_box_margin: int = 6
+    static_region_link_threshold_fraction: float = 0.05
+    subject_offset_clip_fraction: float = 0.10
     static_foreground_quantile: float = 0.85
     static_foreground_softness_fraction: float = 0.05
     static_face_expand_x: float = 0.20
@@ -397,11 +403,12 @@ def _static_guidance_mask(
     grid_shape: tuple[int, int],
     cfg: DepthSyncConfig,
     face_box: Optional[tuple[float, float, float, float]] = None,
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray]:
     """Estimate cells that are stable in both motion and relative depth."""
     grid_h, grid_w = grid_shape
     if motion is None or grid_h <= 0 or grid_w <= 0:
-        return np.zeros((max(grid_h, 0), max(grid_w, 0)), np.float32)
+        empty = np.zeros((max(grid_h, 0), max(grid_w, 0)), np.float32)
+        return empty, empty.copy()
     magnitudes: list[np.ndarray] = []
     confidences: list[np.ndarray] = []
     for index in range(1, len(motion.to_previous)):
@@ -422,6 +429,7 @@ def _static_guidance_mask(
         0.0,
         1.0,
     ).astype(np.float32)
+    motion_gate = stable.copy()
 
     # Remove each frame's global median before measuring temporal depth change.
     # This keeps genuinely static background eligible even when the lightweight
@@ -442,10 +450,20 @@ def _static_guidance_mask(
     ).astype(np.float32)
     stable *= depth_gate
 
-    # Median MAD misses an object that enters a background cell only near one
-    # end of the clip (the 02 hair failure). A trimmed temporal range rejects
-    # such transient occupancy without reacting to a single noisy frame.
-    temporal_range = np.nanquantile(centered, 0.95, axis=0) - np.nanquantile(centered, 0.05, axis=0)
+    # Median MAD misses an object that occupies a background cell only near one
+    # end of the clip. A short temporal median rejects isolated one-frame noise;
+    # the following full range still catches a silhouette present for >=2 frames.
+    temporal_filtered = centered
+    temporal_radius = max(int(cfg.static_temporal_median_radius), 0)
+    if temporal_radius > 0 and centered.shape[0] > 1:
+        temporal_filtered = np.empty_like(centered)
+        for index in range(centered.shape[0]):
+            lo = max(index - temporal_radius, 0)
+            hi = min(index + temporal_radius + 1, centered.shape[0])
+            temporal_filtered[index] = np.nanmedian(centered[lo:hi], axis=0)
+    temporal_range = np.nanmax(temporal_filtered, axis=0) - np.nanmin(
+        temporal_filtered, axis=0
+    )
     range_threshold = cfg.static_depth_range_fraction * max(photo_range, cfg.eps)
     range_softness = cfg.static_depth_range_softness_fraction * max(photo_range, cfg.eps)
     occupancy_gate = np.clip(
@@ -521,10 +539,90 @@ def _static_guidance_mask(
             static_mask,
             np.ones((2 * radius + 1, 2 * radius + 1), np.uint8),
         )
-        # The expanded-face foreground prior remains a hard barrier, while
-        # background motion/depth holes may be completed up to their boundary.
-        static_mask *= foreground_gate
-    return np.clip(static_mask, 0.0, 1.0).astype(np.float32)
+    # A silhouette-shaped all-clip exclusion leaves a visible "ghost contour"
+    # in the background whenever the actor moves away. Convert the connected
+    # moving subject track into one compact rectangular protection ROI instead:
+    # the whole subject corridor stays on the temporally consistent video path,
+    # while static guidance remains continuous everywhere outside that ROI.
+    subject_evidence = np.logical_and(
+        occupancy_gate < cfg.static_occupancy_barrier_threshold,
+        motion_gate < cfg.static_occupancy_barrier_threshold,
+    ).astype(np.uint8)
+    subject_barrier = np.zeros_like(subject_evidence)
+    if cfg.static_occupancy_barrier_radius > 0:
+        radius = cfg.static_occupancy_barrier_radius
+        subject_evidence = cv2.dilate(
+            subject_evidence,
+            np.ones((2 * radius + 1, 2 * radius + 1), np.uint8),
+        )
+    if face_box is not None and np.any(subject_evidence):
+        count, labels, stats, _ = cv2.connectedComponentsWithStats(
+            subject_evidence, connectivity=8
+        )
+        x0, y0, x1, y1 = face_box
+        seed_x0 = max(int(np.floor((x0 - cfg.static_face_expand_x) * grid_w)), 0)
+        seed_x1 = min(int(np.ceil((x1 + cfg.static_face_expand_x) * grid_w)), grid_w)
+        seed_y0 = max(int(np.floor((y0 - cfg.static_face_expand_top) * grid_h)), 0)
+        seed_y1 = min(int(np.ceil((y1 + cfg.static_face_expand_bottom) * grid_h)), grid_h)
+        seed_labels = labels[seed_y0:seed_y1, seed_x0:seed_x1]
+        candidates = [int(label) for label in np.unique(seed_labels) if label > 0]
+        if candidates:
+            label = max(candidates, key=lambda value: int(stats[value, cv2.CC_STAT_AREA]))
+            margin = max(int(cfg.static_subject_box_margin), 0)
+            box_x = max(int(stats[label, cv2.CC_STAT_LEFT]) - margin, 0)
+            box_y = max(int(stats[label, cv2.CC_STAT_TOP]) - margin, 0)
+            box_w = int(stats[label, cv2.CC_STAT_WIDTH])
+            box_h = int(stats[label, cv2.CC_STAT_HEIGHT])
+            box_x1 = min(box_x + box_w + 2 * margin, grid_w)
+            box_y1 = min(box_y + box_h + 2 * margin, grid_h)
+            subject_barrier[box_y:box_y1, box_x:box_x1] = 1
+    static_mask *= (1.0 - subject_barrier.astype(np.float32)) * foreground_gate
+    if np.any(subject_barrier) and cfg.static_region_link_threshold_fraction > 0:
+        threshold = (
+            cfg.static_region_link_threshold_fraction * max(photo_range, cfg.eps)
+        )
+        pixel_count = grid_h * grid_w
+        parents = np.arange(pixel_count, dtype=np.int32)
+
+        def find(index: int) -> int:
+            root = index
+            while parents[root] != root:
+                root = int(parents[root])
+            while parents[index] != index:
+                next_index = int(parents[index])
+                parents[index] = root
+                index = next_index
+            return root
+
+        def union(first: int, second: int) -> None:
+            first_root = find(first)
+            second_root = find(second)
+            if first_root != second_root:
+                parents[second_root] = first_root
+
+        for y in range(grid_h):
+            row = y * grid_w
+            for x in range(grid_w):
+                index = row + x
+                value = photo_grid[y, x]
+                if not np.isfinite(value):
+                    continue
+                if x > 0 and abs(float(value - photo_grid[y, x - 1])) <= threshold:
+                    union(index, index - 1)
+                if y > 0 and abs(float(value - photo_grid[y - 1, x])) <= threshold:
+                    union(index, index - grid_w)
+        regions = np.fromiter(
+            (find(index) for index in range(pixel_count)),
+            dtype=np.int32,
+            count=pixel_count,
+        ).reshape(grid_h, grid_w)
+        contaminated_regions = np.unique(regions[subject_barrier > 0])
+        region_barrier = np.isin(regions, contaminated_regions)
+        static_mask[region_barrier] = 0.0
+    return (
+        np.clip(static_mask, 0.0, 1.0).astype(np.float32),
+        subject_barrier.astype(np.float32),
+    )
 
 
 def _residual_weight(distance: int, radius: int) -> float:
@@ -713,13 +811,43 @@ class DepthSync:
                     base_outputs[i] = (a * raw[i] + b).astype(np.float32)
                 previous_index = i
 
+        if (
+            cfg.mapping_mode == "lut"
+            and face_box is not None
+            and cfg.subject_offset_clip_fraction > 0
+        ):
+            x0, y0, x1, y1 = face_box
+            subject_ys = slice(
+                max(int(y0 * shape[0]), 0),
+                min(int(np.ceil(y1 * shape[0])), shape[0]),
+            )
+            subject_xs = slice(
+                max(int(x0 * shape[1]), 0),
+                min(int(np.ceil(x1 * shape[1])), shape[1]),
+            )
+            anchor_base = base_outputs[anchor_index]
+            assert anchor_base is not None
+            subject_delta = photo[subject_ys, subject_xs] - anchor_base[
+                subject_ys, subject_xs
+            ]
+            finite_delta = subject_delta[np.isfinite(subject_delta)]
+            if finite_delta.size:
+                limit = cfg.subject_offset_clip_fraction * max(photo_range, cfg.eps)
+                delta = float(np.clip(np.median(finite_delta), -limit, limit))
+                lut_y += delta
+                offsets += delta
+                base_outputs = [
+                    None if base is None else (base + delta).astype(np.float32)
+                    for base in base_outputs
+                ]
+
         grid_h, grid_w = cfg.residual_grid_shape
         static_grid_h, static_grid_w = cfg.static_grid_shape
         target_grid_h, target_grid_w = cfg.static_target_shape
         residual_grids = np.zeros((n, max(grid_h, 0), max(grid_w, 0)), np.float32)
         concrete_base_outputs = [base for base in base_outputs if base is not None]
         assert len(concrete_base_outputs) == n
-        static_mask = _static_guidance_mask(
+        static_mask, subject_barrier = _static_guidance_mask(
             motion,
             concrete_base_outputs,
             photo,
@@ -756,6 +884,15 @@ class DepthSync:
                     static_mask, (grid_w, grid_h), interpolation=cv2.INTER_AREA
                 )
                 residual_grids *= 1.0 - residual_static_mask[None]
+            if subject_barrier.size:
+                residual_subject_mask = cv2.resize(
+                    subject_barrier,
+                    (grid_w, grid_h),
+                    interpolation=cv2.INTER_AREA,
+                )
+                residual_grids *= (
+                    residual_subject_mask[None] <= cfg.eps
+                ).astype(np.float32)
 
         outputs: list[np.ndarray] = []
         for base, residual_grid in zip(base_outputs, residual_grids):

@@ -43,7 +43,12 @@ def _anchor_edge_nmae(depth: np.ndarray, photo: np.ndarray) -> float:
     return float(np.median(np.abs(depth_gradient[valid] - photo_gradient[valid])) / photo_scale)
 
 
-def _temporal_errors(sequence: np.ndarray, motion: MotionSequence, scale: float) -> np.ndarray:
+def _temporal_errors(
+    sequence: np.ndarray,
+    motion: MotionSequence,
+    scale: float,
+    region: np.ndarray | None = None,
+) -> np.ndarray:
     """Motion-compensated median frame differences, indexed by destination frame - 1."""
     height, width = sequence.shape[1:]
     yy, xx = np.mgrid[:height, :width].astype(np.float32)
@@ -62,6 +67,8 @@ def _temporal_errors(sequence: np.ndarray, motion: MotionSequence, scale: float)
             motion.confidence_previous[index], (width, height), interpolation=cv2.INTER_LINEAR
         )
         valid = np.isfinite(previous) & np.isfinite(sequence[index]) & (confidence > 0.15)
+        if region is not None:
+            valid &= region
         errors.append(
             float(np.median(np.abs(sequence[index][valid] - previous[valid])) / scale)
             if np.any(valid)
@@ -161,6 +168,22 @@ def evaluate_scene(
     temporal_scale = _robust_range(photo_low) + 1e-6
     v1_temporal = _temporal_errors(v1.depths, motion, temporal_scale)
     v3_temporal = _temporal_errors(v3.depths, motion, temporal_scale)
+    x0, y0, x1, y1 = face_box
+    subject_region = _region_mask(
+        photo_low.shape,
+        (
+            max(x0 - 0.20, 0.0),
+            max(y0 - 0.20, 0.0),
+            min(x1 + 0.20, 1.0),
+            min(y1 + 0.50, 1.0),
+        ),
+    )
+    v1_subject_temporal = _temporal_errors(
+        v1.depths, motion, temporal_scale, subject_region
+    )
+    v3_subject_temporal = _temporal_errors(
+        v3.depths, motion, temporal_scale, subject_region
+    )
     interior = slice(4, max(len(v3_temporal) - 5, 5))
     excess = v3_temporal[interior] - v1_temporal[interior]
     excess_index = int(np.nanargmax(excess)) + 5
@@ -182,6 +205,12 @@ def evaluate_scene(
         "v3_switch_global": _aligned_switch_error(v3.depths, photo_low, anchor, motion, face_box, False),
         "v1_temporal_p95": float(np.nanquantile(v1_temporal[interior], 0.95)),
         "v3_temporal_p95": float(np.nanquantile(v3_temporal[interior], 0.95)),
+        "v1_subject_temporal_p95": float(
+            np.nanquantile(v1_subject_temporal[interior], 0.95)
+        ),
+        "v3_subject_temporal_p95": float(
+            np.nanquantile(v3_subject_temporal[interior], 0.95)
+        ),
         "v3_excess_jump_max": float(np.nanmax(excess)),
         "v3_excess_jump_frame": excess_index,
         "v1_prepare_ms_per_frame": v1_prepare_ms,
@@ -282,10 +311,10 @@ def evaluate_scene(
 def write_report(metrics: list[dict[str, float | int | str]], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
-        "# DepthSync V3.6 时域稳定性验证结果",
+        "# DepthSync V3.7 时域稳定性验证结果",
         "",
-        "| 场景 | 锚帧 NMAE V1→V3 | 人脸切换 V1→V3 | 全局切换 V1→V3 | 时序 P95 V1→V3 | 最大新增跳变（帧） | V3 ms/帧 |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        "| 场景 | 锚帧 NMAE V1→V3 | 人脸切换 V1→V3 | 全局切换 V1→V3 | 全局时序 P95 V1→V3 | 主体时序 P95 V1→V3 | 最大新增跳变（帧） | V3 ms/帧 |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for item in metrics:
         lines.append(
@@ -293,6 +322,7 @@ def write_report(metrics: list[dict[str, float | int | str]], path: Path) -> Non
             f"{item['v1_switch_face']:.4f} → {item['v3_switch_face']:.4f} | "
             f"{item['v1_switch_global']:.4f} → {item['v3_switch_global']:.4f} | "
             f"{item['v1_temporal_p95']:.4f} → {item['v3_temporal_p95']:.4f} | "
+            f"{item['v1_subject_temporal_p95']:.4f} → {item['v3_subject_temporal_p95']:.4f} | "
             f"{item['v3_excess_jump_max']:.4f}（{item['v3_excess_jump_frame']}） | "
             f"{item['v3_apply_ms_per_frame']:.3f} |"
         )
@@ -310,19 +340,21 @@ def write_report(metrics: list[dict[str, float | int | str]], path: Path) -> Non
             "- V3.4 对静态权重做小孔闭合与低通正则，再重新施加动态占用和深度边缘保护，消除 block MV 置信度孔洞在平面墙上形成的块状分层。",
             "- V3.5 将静态照片目标层提升到 128×72，并对 8-bit 对比视频使用固定亚 LSB 抖动；前者减少低分辨率目标层的分段插值，后者只消除可视化量化产生的伪轮廓，不改变浮点深度。",
             "- V3.6 定位到墙边约 15 像素宽的回退带：静态照片层在深度边缘被关闭后重新露出尺度不同的视频基础深度。新版用扩展人脸区域内的近景先验保护人物，同时允许静态背景掩码完成到物体边界。",
+            "- V3.7 修复 V3.6 的主体副作用：短时主体占用由 3 帧时域中值 + 全范围检测捕获；人物运动走廊不再形成轮廓形静态掩码孔洞，而是污染其所在的完整照片深度连通平面。主体走廊关闭 16×9 空间残差，仅保留固定 LUT 和全片恒定的小 offset。",
             "",
             "## 01 左墙专项检查",
             "",
             f"- V1 墙面中位值全片范围：{metrics[0].get('v1_static_median_range', float('nan')):.4f}。",
-            f"- V3.6 墙面中位值全片范围：{metrics[0].get('v3_static_median_range', float('nan')):.4f}；相对 DepthPro 中位值偏差：{metrics[0].get('v3_static_photo_bias', float('nan')):.4f}。",
+            f"- V3.7 墙面中位值全片范围：{metrics[0].get('v3_static_median_range', float('nan')):.4f}；相对 DepthPro 中位值偏差：{metrics[0].get('v3_static_photo_bias', float('nan')):.4f}。",
             f"- 墙面静态权重 Laplacian P95：{metrics[0].get('v3_static_mask_laplacian_p95', float('nan')):.6f}（越低表示网格分层越弱）。",
             f"- 墙边锚帧 MAE/P95：{metrics[0].get('v3_static_edge_mae', float('nan')):.6f} / {metrics[0].get('v3_static_edge_p95', float('nan')):.6f}；连续回退带中位宽度：{metrics[0].get('v3_static_edge_fallback_width_median', float('nan')):.1f} px。",
             "",
             "## 口径",
             "",
-            "- V1 是逐帧全局 affine；V3.6 固定锚帧 8 节点单调 LUT 的形状，只允许逐帧小幅 affine 修正，动态区域叠加 16×9 残差网格，静态区域使用 128×72 掩码和同分辨率照片目标层。",
+            "- V1 是逐帧全局 affine；V3.7 固定锚帧 8 节点单调 LUT 的形状，只允许逐帧小幅 affine 修正；主体走廊只使用 LUT 与固定 offset，非主体动态区域可使用 16×9 残差，可靠静态平面使用 128×72 照片层。",
             "- LUT 修正在锚点附近渐进解锁；残差通过稀疏 block MV 传播，在 ±30 帧内使用余弦权重衰减。",
             "- 时序指标是 block MV 补偿后的相邻帧中位差，P95 和最大新增跳变忽略首尾各 5 帧的流式模型启动/结束区。",
+            "- 主体时序指标在扩展人脸 ROI 内计算，用于单独发现静态照片层或空间残差对人物一致性的破坏。",
             "- 每段素材取中间 3 秒并统一为 30 fps / 90 帧，照片锚点为第 45 帧。",
             "- 耗时为 Python/NumPy 原型实测，只用于相对比较；端侧 C/C++/NEON 实现会采用定长 LUT。",
             "- 本验证没有真实深度 GT，指标衡量照片锚点一致性和切换连续性，不代表绝对深度精度。",

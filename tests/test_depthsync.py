@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 
 from depthsync import DepthSync, DepthSyncConfig, FrameParameters, MotionSequence
+from depthsync.core import _static_guidance_mask
 from depthsync.validation import prepare_validation_clip
 from depthsync.depth_visualization import colorize_depth, depth_to_gray16, normalize_depth
 
@@ -159,6 +160,35 @@ class DepthSyncTest(unittest.TestCase):
         )
         self.assertLess(float(np.max(result.static_mask[5:13, 9:16])), 1e-6)
         self.assertGreater(float(np.mean(result.static_mask[:, :6])), 0.9)
+
+    def test_subject_track_rejects_whole_connected_depth_plane(self):
+        t, h, w = 7, 18, 24
+        photo = np.full((h, w), 0.2, np.float32)
+        photo[:, 12:] = 0.6
+        sequence = np.repeat(photo[None], t, axis=0)
+        sequence[:3, 6:14, 15:21] = 0.9
+        fields = np.zeros((t, h, w, 2), np.float32)
+        fields[1:4, 6:14, 15:21, 0] = 0.02
+        confidence = np.ones((t, h, w), np.float32)
+        config = DepthSyncConfig(
+            static_grid_shape=(h, w),
+            static_close_radius=0,
+            static_mask_blur_sigma=0.0,
+            static_expand_radius=0,
+            static_subject_box_margin=1,
+        )
+        mask, subject_barrier = _static_guidance_mask(
+            MotionSequence(fields, fields.copy(), confidence, confidence.copy()),
+            list(sequence),
+            photo,
+            0.7,
+            (h, w),
+            config,
+            face_box=(0.65, 0.30, 0.90, 0.80),
+        )
+        self.assertGreater(float(np.mean(mask[:, :10])), 0.9)
+        self.assertLess(float(np.max(mask[:, 12:])), 1e-6)
+        self.assertGreater(float(np.mean(subject_barrier[5:15, 14:22])), 0.5)
 
     def test_apply_frame_uses_only_scale_and_offset(self):
         depth = np.array([[1.0, 2.0]], np.float32)
