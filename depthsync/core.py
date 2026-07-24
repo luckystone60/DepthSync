@@ -72,7 +72,8 @@ class DepthSyncConfig:
     region_offset_clip_fraction: float = 0.75
     region_offset_step_fraction: float = 0.75
     region_offset_smoothing: float = 1.0
-    region_edge_kernel: int = 3
+    region_shape_open_radius: int = 2
+    region_edge_kernel: int = 1
     region_motion_min_confidence: float = 0.30
     eps: float = 1e-6
 
@@ -739,6 +740,22 @@ def _connected_depth_labels(depth: np.ndarray, threshold: float) -> np.ndarray:
     return labels.reshape(height, width).astype(np.int32)
 
 
+def _largest_open_component(mask: np.ndarray, radius: int) -> np.ndarray:
+    """Remove narrow region branches and retain the dominant connected plane."""
+    if radius <= 0:
+        return mask.astype(bool)
+    opened = cv2.morphologyEx(
+        mask.astype(np.uint8),
+        cv2.MORPH_OPEN,
+        np.ones((2 * radius + 1, 2 * radius + 1), np.uint8),
+    )
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(opened, connectivity=8)
+    if count <= 1:
+        return np.zeros(mask.shape, bool)
+    largest = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    return labels == largest
+
+
 def _motion_global_shifts(
     motion: Optional[MotionSequence],
     frame_count: int,
@@ -847,6 +864,7 @@ def _build_v4_regions(
         ] = True
     for component in order:
         pixels = components == component
+        pixels = _largest_open_component(pixels, cfg.region_shape_open_radius)
         area = int(np.count_nonzero(pixels))
         if area < minimum_area or len(targets) > cfg.region_max_count:
             continue

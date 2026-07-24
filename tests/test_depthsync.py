@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 
 from depthsync import DepthSync, DepthSyncConfig, FrameParameters, MotionSequence
-from depthsync.core import _static_guidance_mask
+from depthsync.core import _largest_open_component, _static_guidance_mask
 from depthsync.validation import prepare_validation_clip
 from depthsync.depth_visualization import colorize_depth, depth_to_gray16, normalize_depth
 
@@ -174,6 +174,33 @@ class DepthSyncTest(unittest.TestCase):
         )
         subject_delta = replay[10:28, 20:30] - global_only[10:28, 20:30]
         self.assertLess(float(np.max(np.abs(subject_delta))), 1e-6)
+
+    def test_v4_region_shape_removes_thin_tail(self):
+        mask = np.zeros((24, 32), bool)
+        mask[3:21, 2:14] = True
+        mask[17:19, 14:28] = True
+        cleaned = _largest_open_component(mask, radius=2)
+        self.assertTrue(bool(cleaned[10, 8]))
+        self.assertFalse(bool(cleaned[18, 24]))
+
+    def test_v4_region_correction_reaches_depth_boundary(self):
+        depth = np.full((12, 16), 0.8, np.float32)
+        depth[:, :8] = 0.2
+        labels = np.zeros((12, 16), np.uint8)
+        labels[:, :8] = 1
+        params = FrameParameters(
+            1.0,
+            0.0,
+            1.0,
+            guidance_range=0.6,
+            region_labels=labels,
+            region_scales=np.ones(2, np.float32),
+            region_offsets=np.array([0.0, 0.1], np.float32),
+            region_shift=np.zeros(2, np.float32),
+        )
+        output = DepthSync().apply_frame(depth, params)
+        np.testing.assert_allclose(output[:, :8], 0.3, atol=1e-6)
+        np.testing.assert_allclose(output[:, 8:], 0.8, atol=1e-6)
 
     def test_isolated_static_confidence_hole_is_filled(self):
         t, h, w = 7, 30, 40
