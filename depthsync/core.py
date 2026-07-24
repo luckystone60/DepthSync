@@ -1,7 +1,7 @@
 """Parameter-only photo-anchor depth synchronization for edge deployment."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional, Sequence
 
 import cv2
@@ -25,7 +25,8 @@ class DepthSyncConfig:
     min_fit_pixels: int = 128
     high_res_interpolation: int = cv2.INTER_LINEAR
     mapping_mode: str = "lut"
-    lut_nodes: int = 8
+    lut_nodes: int = 16
+    lut_candidate_nodes: tuple[int, ...] = (8, 12, 16)
     residual_grid_shape: tuple[int, int] = (9, 16)
     static_grid_shape: tuple[int, int] = (72, 128)
     static_target_shape: tuple[int, int] = (72, 128)
@@ -64,7 +65,7 @@ class DepthSyncConfig:
     correction_edge_threshold_fraction: float = 0.50
     correction_edge_softness_fraction: float = 0.10
     static_min_confidence: float = 0.30
-    region_grid_shape: tuple[int, int] = (72, 128)
+    region_grid_shape: tuple[int, int] = (0, 0)
     region_link_threshold_fraction: float = 0.04
     region_min_area_fraction: float = 0.01
     region_max_count: int = 8
@@ -1000,6 +1001,10 @@ class DepthSync:
         shape = video_depths[anchor_index].shape[:2]
         raw = [_resize(_to_working(d, cfg.depth_mode, cfg.eps), shape) for d in video_depths]
         photo = _align_photo(_to_working(photo_depth, cfg.depth_mode, cfg.eps), shape, photo_to_video_grid)
+        valid_photo = photo[np.isfinite(photo)]
+        photo_range = float(
+            np.quantile(valid_photo, 0.9) - np.quantile(valid_photo, 0.1)
+        ) if valid_photo.size else 1.0
         base_outputs: list[Optional[np.ndarray]] = [None] * n
         scales, offsets, confidences = np.ones(n), np.zeros(n), np.zeros(n)
         reasons = [""] * n
@@ -1013,14 +1018,97 @@ class DepthSync:
         anchor_lut_x, anchor_lut_y = _affine_lut(anchor_source, a, b, cfg)
         confidence = affine_confidence
         if cfg.mapping_mode == "lut":
-            candidate_x, candidate_y, lut_confidence = robust_monotonic_lut_samples(
-                anchor_source, anchor_target, None, cfg
-            )
-            if lut_confidence > 0:
-                anchor_lut_x, anchor_lut_y = _canonical_lut(
-                    candidate_x, candidate_y, cfg.lut_nodes, cfg.eps
+            best_score = float("inf")
+            candidate_counts = tuple(
+                sorted(
+                    {
+                        int(nodes)
+                        for nodes in cfg.lut_candidate_nodes
+                        if 2 <= int(nodes) <= cfg.lut_nodes
+                    }
                 )
-                confidence = lut_confidence
+            ) or (cfg.lut_nodes,)
+            for candidate_nodes in candidate_counts:
+                candidate_cfg = replace(cfg, lut_nodes=candidate_nodes)
+                candidate_x, candidate_y, lut_confidence = (
+                    robust_monotonic_lut_samples(
+                        anchor_source,
+                        anchor_target,
+                        None,
+                        candidate_cfg,
+                    )
+                )
+                if lut_confidence <= 0:
+                    continue
+                canonical_x, canonical_y = _canonical_lut(
+                    candidate_x,
+                    candidate_y,
+                    cfg.lut_nodes,
+                    cfg.eps,
+                )
+                prediction = _apply_lut(
+                    raw[anchor_index],
+                    canonical_x,
+                    canonical_y,
+                    cfg.eps,
+                )
+                valid = np.isfinite(prediction) & np.isfinite(photo)
+                if not np.any(valid):
+                    continue
+                score_prediction = prediction
+                face_valid = np.zeros(shape, bool)
+                if face_box is not None:
+                    x0, y0, x1, y1 = face_box
+                    face_valid[
+                        max(int(y0 * shape[0]), 0) : min(
+                            int(np.ceil(y1 * shape[0])),
+                            shape[0],
+                        ),
+                        max(int(x0 * shape[1]), 0) : min(
+                            int(np.ceil(x1 * shape[1])),
+                            shape[1],
+                        ),
+                    ] = True
+                    face_valid &= valid
+                    if (
+                        np.any(face_valid)
+                        and cfg.subject_offset_clip_fraction > 0
+                    ):
+                        limit = (
+                            cfg.subject_offset_clip_fraction
+                            * max(photo_range, cfg.eps)
+                        )
+                        subject_delta = float(
+                            np.clip(
+                                np.median(
+                                    photo[face_valid]
+                                    - prediction[face_valid]
+                                ),
+                                -limit,
+                                limit,
+                            )
+                        )
+                        score_prediction = prediction + subject_delta
+                score = float(
+                    np.median(
+                        np.abs(score_prediction[valid] - photo[valid])
+                    )
+                    / max(photo_range, cfg.eps)
+                )
+                if np.any(face_valid):
+                    score += float(
+                        np.median(
+                            np.abs(
+                                score_prediction[face_valid]
+                                - photo[face_valid]
+                            )
+                        )
+                        / max(photo_range, cfg.eps)
+                    )
+                if score < best_score:
+                    best_score = score
+                    anchor_lut_x, anchor_lut_y = canonical_x, canonical_y
+                    confidence = lut_confidence
         if confidence <= 0:
             reasons[anchor_index] = "insufficient_anchor_support"
         if cfg.mapping_mode == "lut":
@@ -1033,9 +1121,6 @@ class DepthSync:
             base_outputs[anchor_index] = _apply_lut(raw[anchor_index], anchor_lut_x, anchor_lut_y, cfg.eps)
         else:
             base_outputs[anchor_index] = (a * raw[anchor_index] + b).astype(np.float32)
-        valid_photo = photo[np.isfinite(photo)]
-        photo_range = float(np.quantile(valid_photo, 0.9) - np.quantile(valid_photo, 0.1)) if valid_photo.size else 1.0
-
         for direction in (-1, 1):
             previous_index = anchor_index
             for i in range(anchor_index + direction, -1 if direction < 0 else n, direction):

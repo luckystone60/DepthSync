@@ -49,6 +49,8 @@ class DepthSyncTest(unittest.TestCase):
         self.assertEqual(result.scales[3], result.scales[2])
         self.assertEqual(result.fallback_reasons[1], "anchor_lock")
         self.assertEqual(result.fallback_reasons[3], "anchor_lock")
+        self.assertEqual(result.region_labels.size, 0)
+        self.assertEqual(result.lut_x.shape[1], 16)
 
     def test_v3_improves_nonlinear_and_spatial_anchor_alignment(self):
         t, h, w, anchor = 7, 54, 80, 3
@@ -201,6 +203,32 @@ class DepthSyncTest(unittest.TestCase):
         output = DepthSync().apply_frame(depth, params)
         np.testing.assert_allclose(output[:, :8], 0.3, atol=1e-6)
         np.testing.assert_allclose(output[:, 8:], 0.8, atol=1e-6)
+
+    def test_v4_adaptive_lut_is_no_worse_than_fixed_candidates(self):
+        h, w = 48, 72
+        yy, xx = np.mgrid[:h, :w].astype(np.float32)
+        anchor = 0.1 + 0.8 * xx / (w - 1) + 0.05 * yy / (h - 1)
+        photo = 0.2 + 0.45 * anchor + 0.6 * anchor**2
+        video = np.stack([anchor - 0.002, anchor, anchor + 0.002])
+        errors = {}
+        for candidates in ((8,), (16,), (8, 16)):
+            result = DepthSync(
+                DepthSyncConfig(
+                    lut_nodes=16,
+                    lut_candidate_nodes=candidates,
+                    region_grid_shape=(0, 0),
+                    subject_offset_clip_fraction=0.0,
+                    min_fit_pixels=64,
+                    sample_count=1024,
+                )
+            ).offline_prepare(video, photo, 1)
+            errors[candidates] = float(
+                np.median(np.abs(result.depths[1] - photo))
+            )
+        self.assertLessEqual(
+            errors[(8, 16)],
+            min(errors[(8,)], errors[(16,)]) + 1e-6,
+        )
 
     def test_isolated_static_confidence_hole_is_filled(self):
         t, h, w = 7, 30, 40

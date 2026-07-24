@@ -247,20 +247,23 @@ def evaluate_scene(
             if v3.static_mask.size
             else (v3.region_labels > 0).astype(np.float32)
         )
-        mask_full = cv2.resize(
-            guidance_mask,
-            (video_depth.shape[2], video_depth.shape[1]),
-            interpolation=cv2.INTER_NEAREST,
-        )
-        margin_y = max((ys.stop - ys.start) // 8, 1)
-        margin_x = max((xs.stop - xs.start) // 8, 1)
-        mask_inner = mask_full[
-            ys.start + margin_y : ys.stop - margin_y,
-            xs.start + margin_x : xs.stop - margin_x,
-        ]
-        metrics["v4_static_mask_laplacian_p95"] = float(
-            np.nanquantile(np.abs(cv2.Laplacian(mask_inner, cv2.CV_32F)), 0.95)
-        )
+        if guidance_mask.size:
+            mask_full = cv2.resize(
+                guidance_mask,
+                (video_depth.shape[2], video_depth.shape[1]),
+                interpolation=cv2.INTER_NEAREST,
+            )
+            margin_y = max((ys.stop - ys.start) // 8, 1)
+            margin_x = max((xs.stop - xs.start) // 8, 1)
+            mask_inner = mask_full[
+                ys.start + margin_y : ys.stop - margin_y,
+                xs.start + margin_x : xs.stop - margin_x,
+            ]
+            metrics["v4_static_mask_laplacian_p95"] = float(
+                np.nanquantile(np.abs(cv2.Laplacian(mask_inner, cv2.CV_32F)), 0.95)
+            )
+        else:
+            metrics["v4_static_mask_laplacian_p95"] = 0.0
         edge_errors: list[float] = []
         fallback_widths: list[int] = []
         edge_threshold = 0.01 * temporal_scale
@@ -323,7 +326,7 @@ def evaluate_scene(
 def write_report(metrics: list[dict[str, float | int | str]], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
-        "# DepthSync V4 区域参数监督验证结果",
+        "# DepthSync V4 全局单调 LUT 验证结果",
         "",
         "| 场景 | 锚帧 NMAE V1→V4 | 人脸切换 V1→V4 | 全局切换 V1→V4 | 全局时序 P95 V1→V4 | 主体时序 P95 V1→V4 | 最大新增跳变（帧） | V4 ms/帧 |",
         "|---|---:|---:|---:|---:|---:|---:|---:|",
@@ -353,21 +356,20 @@ def write_report(metrics: list[dict[str, float | int | str]], path: Path) -> Non
             "- V3.5 将静态照片目标层提升到 128×72，并对 8-bit 对比视频使用固定亚 LSB 抖动；前者减少低分辨率目标层的分段插值，后者只消除可视化量化产生的伪轮廓，不改变浮点深度。",
             "- V3.6 定位到墙边约 15 像素宽的回退带：静态照片层在深度边缘被关闭后重新露出尺度不同的视频基础深度。新版用扩展人脸区域内的近景先验保护人物，同时允许静态背景掩码完成到物体边界。",
             "- V3.7 修复 V3.6 的主体副作用：短时主体占用由 3 帧时域中值 + 全范围检测捕获；人物运动走廊不再形成轮廓形静态掩码孔洞，而是污染其所在的完整照片深度连通平面。主体走廊关闭 16×9 空间残差，仅保留固定 LUT 和全片恒定的小 offset。",
-            "- V4 改变照片引导方式：照片深度只估计全局 LUT 和少量区域 offset，不再作为逐像素目标写入视频。区域边界来自锚帧视频深度，播放阶段只叠加标量修正，因此不会把照片锚帧残差、人物轮廓或网格纹理传播到其他帧。",
+            "- V4 最终撤下运行时空间区域修正：固定标签的全局平移会在 01 第 0 帧产生左右竖缝，常量区域 offset 会在第 60 帧形成“7”形硬轮廓。默认路径改为自适应选择 8/12/16 有效节点、统一序列化为 16 节点的全局单调 LUT，从机制上不再产生空间接缝。",
             "",
-            "## 01 左墙专项检查",
+            "## 01 左墙与空间接缝专项检查",
             "",
             f"- V1 墙面中位值全片范围：{metrics[0].get('v1_static_median_range', float('nan')):.4f}。",
-            f"- V4 墙面中位值全片范围：{metrics[0].get('v4_static_median_range', float('nan')):.4f}；相对 DepthPro 中位值偏差：{metrics[0].get('v4_static_photo_bias', float('nan')):.4f}。",
-            f"- 区域标签 Laplacian P95：{metrics[0].get('v4_static_mask_laplacian_p95', float('nan')):.6f}。",
-            f"- 墙边锚帧 MAE/P95：{metrics[0].get('v4_static_edge_mae', float('nan')):.6f} / {metrics[0].get('v4_static_edge_p95', float('nan')):.6f}；连续回退带中位宽度：{metrics[0].get('v4_static_edge_fallback_width_median', float('nan')):.1f} px。",
+            f"- V4 墙面中位值全片范围：{metrics[0].get('v4_static_median_range', float('nan')):.4f}；纯全局映射不再单独锁定墙面，这是取消空间接缝后的明确取舍。",
+            "- V4 默认区域标签为空，不执行标签 warp 或区域 offset；第 0 帧左右竖条/黑缝和第 60 帧“7”形轮廓没有生成路径。",
             "",
             "## 口径",
             "",
-            "- V1 是逐帧全局 affine；V4 使用锚帧固定的 8 节点单调 LUT，并在锚帧视频深度的少量大区域上应用标量 offset。",
-            "- 照片深度只在离线准备阶段参与参数估计；播放阶段不读取照片深度、不应用空间残差图，也不需要人物分割 mask。",
+            "- V1 是逐帧全局 affine；V4 在锚帧自适应选择 8/12/16 有效节点的单调 LUT，随后统一为 16 节点定长结构，整段固定非线性形状。",
+            "- 照片深度只在离线准备阶段参与参数估计；播放阶段只执行全局 LUT 和逐帧小 affine，不读取照片深度、不应用任何空间参数，也不需要人物分割 mask。",
             "- 时序指标是 block MV 补偿后的相邻帧中位差，P95 和最大新增跳变忽略首尾各 5 帧的流式模型启动/结束区。",
-            "- 主体时序指标在扩展人脸 ROI 内计算，用于单独发现任何局部区域修正对人物一致性的破坏。",
+            "- 主体时序指标在扩展人脸 ROI 内计算，用于单独约束全局映射对人物一致性的影响。",
             "- 每段素材取中间 3 秒并统一为 30 fps / 90 帧，照片锚点为第 45 帧。",
             "- 耗时为 Python/NumPy 原型实测，只用于相对比较；端侧 C/C++/NEON 实现会采用定长 LUT。",
             "- 本验证没有真实深度 GT，指标衡量照片锚点一致性和切换连续性，不代表绝对深度精度。",

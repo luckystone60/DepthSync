@@ -150,7 +150,7 @@ def render_scene(scene: str, clip_root: Path, depth_root: Path, result_root: Pat
         panels = [
             _panel(colorize_depth(raw[index], photo_limits), f"VDA raw / shared range / {index:02d}", panel_size, photo_limits),
             _panel(colorize_depth(affine[index], photo_limits), "V1 affine / shared range", panel_size, photo_limits),
-            _panel(colorize_depth(synced[index], synced_limits), "V4 region parameter guidance", panel_size, synced_limits),
+            _panel(colorize_depth(synced[index], synced_limits), "V4 adaptive global monotonic LUT", panel_size, synced_limits),
             _panel(photo_color, "DepthPro anchor / photo range", panel_size, photo_limits),
         ]
         frame = np.hstack(panels)
