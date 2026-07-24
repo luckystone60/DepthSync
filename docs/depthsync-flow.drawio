@@ -1,130 +1,52 @@
 <mxfile host="Electron" agent="Codex" version="24.7.17">
-  <diagram id="depthsync-v37" name="DepthSync V3.7 端侧流程">
-    <mxGraphModel dx="1800" dy="1400" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1400" math="0" shadow="0">
+  <diagram id="depthsync-v4" name="DepthSync V4 端侧流程">
+    <mxGraphModel dx="1600" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0">
       <root>
-        <mxCell id="0" />
-        <mxCell id="1" parent="0" />
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="title" value="DepthSync V4：照片参数监督，视频结构与时域优先" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=24;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="200" y="20" width="1200" height="40" as="geometry"/></mxCell>
+        <mxCell id="subtitle" value="无人物分割 mask｜无照片残差传播｜无可靠静态区域时自动回退到全局 LUT" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=14;fontColor=#666666;" vertex="1" parent="1"><mxGeometry x="250" y="62" width="1100" height="28" as="geometry"/></mxCell>
 
-        <mxCell id="title" value="DepthSync V3.7：主体稳定优先 + 深度平面安全引导" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=24;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="250" y="20" width="1300" height="40" as="geometry" />
-        </mxCell>
-        <mxCell id="subtitle" value="参数准备阶段：拍摄后后台执行　｜　播放阶段：无额外模型、无稠密光流" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=14;fontColor=#666666;" vertex="1" parent="1">
-          <mxGeometry x="350" y="60" width="1100" height="28" as="geometry" />
-        </mxCell>
+        <mxCell id="inputLane" value="A. 输入与统一工作域" style="swimlane;html=1;startSize=34;rounded=1;fillColor=#E8F0FE;strokeColor=#5B8FF9;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="40" y="105" width="1520" height="165" as="geometry"/></mxCell>
+        <mxCell id="video" value="视频 disparity&#xa;T×Hv×Wv，FP16&#xa;验证：90 帧" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=13;" vertex="1" parent="inputLane"><mxGeometry x="35" y="55" width="235" height="80" as="geometry"/></mxCell>
+        <mxCell id="photo" value="照片 disparity&#xa;高质量锚帧 k&#xa;仅参数准备阶段使用" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;" vertex="1" parent="inputLane"><mxGeometry x="310" y="55" width="245" height="80" as="geometry"/></mxCell>
+        <mxCell id="mv" value="block MV + confidence&#xa;T×GmH×GmW×2&#xa;编码器 / ISP 复用" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=13;" vertex="1" parent="inputLane"><mxGeometry x="595" y="55" width="255" height="80" as="geometry"/></mxCell>
+        <mxCell id="face" value="可选人脸框&#xa;前景硬保护&#xa;不是人物分割 mask" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=13;" vertex="1" parent="inputLane"><mxGeometry x="890" y="55" width="245" height="80" as="geometry"/></mxCell>
+        <mxCell id="unify" value="几何配准 + disparity 统一&#xa;照片 P10–P90 鲁棒范围" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=13;fontStyle=1;" vertex="1" parent="inputLane"><mxGeometry x="1175" y="50" width="300" height="90" as="geometry"/></mxCell>
 
-        <mxCell id="input-lane" value="A. 输入与统一工作域" style="swimlane;html=1;startSize=34;rounded=1;fillColor=#E8F0FE;strokeColor=#5B8FF9;fontStyle=1;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="40" y="100" width="1720" height="180" as="geometry" />
-        </mxCell>
-        <mxCell id="video" value="视频 disparity 序列&#xa;T×Hv×Wv，FP16/FP32&#xa;验证：90 帧，约 456×256" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=13;" vertex="1" parent="input-lane">
-          <mxGeometry x="35" y="55" width="260" height="90" as="geometry" />
-        </mxCell>
-        <mxCell id="photo" value="DepthPro 照片 disparity&#xa;Hp×Wp，高质量锚帧 k&#xa;配准到视频深度坐标" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;" vertex="1" parent="input-lane">
-          <mxGeometry x="340" y="55" width="260" height="90" as="geometry" />
-        </mxCell>
-        <mxCell id="mv" value="编码器 / ISP block MV&#xa;T×GmH×GmW×2 + confidence&#xa;归一化位移；验证网格 18×32" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=13;" vertex="1" parent="input-lane">
-          <mxGeometry x="645" y="55" width="290" height="90" as="geometry" />
-        </mxCell>
-        <mxCell id="align" value="工作域统一&#xa;depth → disparity（如需要）&#xa;照片几何配准 + resize 到 Hv×Wv" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=13;fontStyle=1;" vertex="1" parent="input-lane">
-          <mxGeometry x="995" y="50" width="300" height="100" as="geometry" />
-        </mxCell>
-        <mxCell id="range" value="照片鲁棒范围&#xa;P10–P90&#xa;统一归一化残差、静态和边缘阈值" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=13;" vertex="1" parent="input-lane">
-          <mxGeometry x="1350" y="50" width="320" height="100" as="geometry" />
-        </mxCell>
+        <mxCell id="prepareLane" value="B. 拍摄后参数准备" style="swimlane;html=1;startSize=34;rounded=1;fillColor=#EAF7EA;strokeColor=#82B366;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="40" y="300" width="1520" height="265" as="geometry"/></mxCell>
+        <mxCell id="sample" value="确定性采样&#xa;低梯度有效点&#xa;分位数 + MAD" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=13;" vertex="1" parent="prepareLane"><mxGeometry x="30" y="80" width="200" height="95" as="geometry"/></mxCell>
+        <mxCell id="lut" value="共享 8 节点单调 LUT&#xa;锚帧固定非线性形状&#xa;逐帧仅小 affine" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;fontStyle=1;" vertex="1" parent="prepareLane"><mxGeometry x="265" y="70" width="245" height="115" as="geometry"/></mxCell>
+        <mxCell id="base" value="基础深度&#xa;Bi=scalei·LUT(Di)+offseti" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=13;" vertex="1" parent="prepareLane"><mxGeometry x="545" y="80" width="220" height="95" as="geometry"/></mxCell>
+        <mxCell id="static" value="128×72 静态可靠性&#xa;MV + 时序 MAD + 全片极差&#xa;可选人脸前景保护" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=13;" vertex="1" parent="prepareLane"><mxGeometry x="800" y="65" width="265" height="125" as="geometry"/></mxCell>
+        <mxCell id="segment" value="锚帧视频深度连通区域&#xa;四邻域阈值 4%&#xa;面积≥1%，静态支持≥65%&#xa;最多 8 区域" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=13;fontStyle=1;" vertex="1" parent="prepareLane"><mxGeometry x="1100" y="55" width="270" height="145" as="geometry"/></mxCell>
+        <mxCell id="offset" value="区域标量 offset&#xa;照片只提供区域中位目标&#xa;逐帧中位锁定 + 异常限幅" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;fontStyle=1;" vertex="1" parent="prepareLane"><mxGeometry x="1390" y="65" width="105" height="130" as="geometry"/></mxCell>
 
-        <mxCell id="mapping-lane" value="B. 锚帧映射与双向时域参数准备" style="swimlane;html=1;startSize=34;rounded=1;fillColor=#EAF7EA;strokeColor=#82B366;fontStyle=1;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="40" y="310" width="1720" height="230" as="geometry" />
-        </mxCell>
-        <mxCell id="sample" value="确定性固定采样&#xa;低梯度有效区域&#xa;人脸约 30%，全图约 70%" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=13;" vertex="1" parent="mapping-lane">
-          <mxGeometry x="35" y="75" width="250" height="100" as="geometry" />
-        </mxCell>
-        <mxCell id="affine" value="鲁棒 affine 初始化 / 回退&#xa;分位数 + MAD + 加权拟合" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=13;" vertex="1" parent="mapping-lane">
-          <mxGeometry x="325" y="75" width="250" height="100" as="geometry" />
-        </mxCell>
-        <mxCell id="lut" value="锚帧 8 节点单调 LUT&#xa;分箱中位数 + 单调回归&#xa;固定非线性形状" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;fontStyle=1;" vertex="1" parent="mapping-lane">
-          <mxGeometry x="615" y="65" width="270" height="115" as="geometry" />
-        </mxCell>
-        <mxCell id="temporal-fit" value="从 k 向前 / 向后扫描&#xa;block MV 建立相邻稀疏对应&#xa;每帧只更新受限 scale + offset" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=13;fontStyle=1;" vertex="1" parent="mapping-lane">
-          <mxGeometry x="930" y="65" width="300" height="115" as="geometry" />
-        </mxCell>
-        <mxCell id="residual" value="动态照片残差&#xa;Rk = P - Lk(Dk)&#xa;裁剪/平滑→16×9，MV warp&#xa;±30 帧余弦衰减" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=13;fontStyle=1;" vertex="1" parent="mapping-lane">
-          <mxGeometry x="1275" y="55" width="300" height="130" as="geometry" />
-        </mxCell>
-        <mxCell id="base-depth" value="基础深度 Bi = Li(Di)&#xa;用于低分辨率时域统计" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=13;" vertex="1" parent="mapping-lane">
-          <mxGeometry x="1600" y="70" width="90" height="105" as="geometry" />
-        </mxCell>
+        <mxCell id="rejectLane" value="C. 安全门：局部修正是可选增强" style="swimlane;html=1;startSize=34;rounded=1;fillColor=#FCE8E6;strokeColor=#B85450;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="40" y="595" width="1520" height="150" as="geometry"/></mxCell>
+        <mxCell id="reject" value="面积小 / 运动 / 低置信 / 人脸相交 / 遮挡不确定 → 标签 0 → 仅全局 LUT" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=14;fontStyle=1;" vertex="1" parent="rejectLane"><mxGeometry x="100" y="55" width="650" height="65" as="geometry"/></mxCell>
+        <mxCell id="noResidual" value="禁止：照片目标层、锚帧残差图、人物锚帧区域传播" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=14;" vertex="1" parent="rejectLane"><mxGeometry x="820" y="55" width="600" height="65" as="geometry"/></mxCell>
 
-        <mxCell id="static-lane" value="C. 静态背景与边缘安全引导" style="swimlane;html=1;startSize=34;rounded=1;fillColor=#F3ECF7;strokeColor=#9673A6;fontStyle=1;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="40" y="570" width="1720" height="250" as="geometry" />
-        </mxCell>
-        <mxCell id="motion-gate" value="运动稳定门控（128×72）&#xa;block MV 幅值 P90&#xa;MV confidence ≥ 0.30" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=13;" vertex="1" parent="static-lane">
-          <mxGeometry x="35" y="75" width="250" height="105" as="geometry" />
-        </mxCell>
-        <mxCell id="depth-gate" value="短时主体占用检测&#xa;去全局中位值后的 MAD&#xa;3 帧时域中值 + 全片极差&#xa;捕获片头/片尾人物与头发" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=13;" vertex="1" parent="static-lane">
-          <mxGeometry x="325" y="65" width="285" height="125" as="geometry" />
-        </mxCell>
-        <mxCell id="photo-edge" value="人物运动走廊&#xa;时序占用变化 + block MV&#xa;扩展人脸 ROI 选主连通轨迹&#xa;主体残差网格置零" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=13;" vertex="1" parent="static-lane">
-          <mxGeometry x="650" y="75" width="260" height="105" as="geometry" />
-        </mxCell>
-        <mxCell id="mask-regularize" value="照片深度平面筛选&#xa;128×72 四邻域连通&#xa;相邻差 ≤ 鲁棒范围 5%&#xa;整平面排除人物污染" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=13;fontStyle=1;" vertex="1" parent="static-lane">
-          <mxGeometry x="950" y="65" width="275" height="125" as="geometry" />
-        </mxCell>
-        <mxCell id="static-mask" value="平面安全静态掩码 M&#xa;128×72&#xa;边界只落在真实深度断层" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;fontStyle=1;" vertex="1" parent="static-lane">
-          <mxGeometry x="1270" y="80" width="180" height="95" as="geometry" />
-        </mxCell>
-        <mxCell id="static-target" value="照片目标层 S&#xa;128×72&#xa;全片共享；减少平面分段插值" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;fontStyle=1;" vertex="1" parent="static-lane">
-          <mxGeometry x="1490" y="75" width="200" height="105" as="geometry" />
-        </mxCell>
+        <mxCell id="packageLane" value="D. 紧凑参数包" style="swimlane;html=1;startSize=34;rounded=1;fillColor=#FFF8E6;strokeColor=#D6B656;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="40" y="775" width="1520" height="150" as="geometry"/></mxCell>
+        <mxCell id="shared" value="共享：LUT 8×2 FP16&#xa;标签 72×128 U8" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;" vertex="1" parent="packageLane"><mxGeometry x="120" y="55" width="300" height="65" as="geometry"/></mxCell>
+        <mxCell id="perframe" value="逐帧：scale/offset&#xa;区域 offset≤9 + 全局 shift" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=13;" vertex="1" parent="packageLane"><mxGeometry x="500" y="50" width="350" height="75" as="geometry"/></mxCell>
+        <mxCell id="size" value="最坏约 11.4 KiB / 90 帧&#xa;无可靠区域约 0.8 KiB" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=14;fontStyle=1;" vertex="1" parent="packageLane"><mxGeometry x="950" y="50" width="430" height="75" as="geometry"/></mxCell>
 
-        <mxCell id="package-lane" value="D. 端侧参数包（一次 Live Photo）" style="swimlane;html=1;startSize=34;rounded=1;fillColor=#FFF8E6;strokeColor=#D6B656;fontStyle=1;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="40" y="850" width="1720" height="170" as="geometry" />
-        </mxCell>
-        <mxCell id="frame-package" value="逐帧参数（T=90）&#xa;LUT x/y：90×8×2&#xa;残差：90×9×16" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=13;fontStyle=1;" vertex="1" parent="package-lane">
-          <mxGeometry x="110" y="55" width="330" height="85" as="geometry" />
-        </mxCell>
-        <mxCell id="clip-package" value="全片共享参数&#xa;M：72×128　S：72×128&#xa;guidance range + 版本/量化信息" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;fontStyle=1;" vertex="1" parent="package-lane">
-          <mxGeometry x="530" y="50" width="370" height="95" as="geometry" />
-        </mxCell>
-        <mxCell id="prototype-size" value="FP32 原型&#xa;约 128.3 KiB / 90 帧" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=13;" vertex="1" parent="package-lane">
-          <mxGeometry x="1020" y="55" width="240" height="85" as="geometry" />
-        </mxCell>
-        <mxCell id="device-size" value="推荐端侧&#xa;LUT/残差/目标 FP16 + 掩码 U8&#xa;约 56–58 KiB / Live Photo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=13;fontStyle=1;" vertex="1" parent="package-lane">
-          <mxGeometry x="1340" y="50" width="300" height="95" as="geometry" />
-        </mxCell>
+        <mxCell id="runtimeLane" value="E. 播放阶段逐帧路径" style="swimlane;html=1;startSize=34;rounded=1;fillColor=#F5F5F5;strokeColor=#666666;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="40" y="955" width="1520" height="190" as="geometry"/></mxCell>
+        <mxCell id="runtimeLut" value="① 8 节点 LUT&#xa;+ 小 affine" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;fontStyle=1;" vertex="1" parent="runtimeLane"><mxGeometry x="55" y="65" width="200" height="80" as="geometry"/></mxCell>
+        <mxCell id="warp" value="② 全局 shift&#xa;最近邻平移 U8 标签" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=13;" vertex="1" parent="runtimeLane"><mxGeometry x="310" y="65" width="230" height="80" as="geometry"/></mxCell>
+        <mxCell id="lookup" value="③ 标签查表&#xa;逐区域标量 offset" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=13;" vertex="1" parent="runtimeLane"><mxGeometry x="595" y="65" width="230" height="80" as="geometry"/></mxCell>
+        <mxCell id="guard" value="④ 当前视频深度&#xa;3×3 边缘保护" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=13;" vertex="1" parent="runtimeLane"><mxGeometry x="880" y="65" width="220" height="80" as="geometry"/></mxCell>
+        <mxCell id="output" value="⑤ 同步深度 Yi&#xa;标签 0：严格全局路径" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=13;fontStyle=1;" vertex="1" parent="runtimeLane"><mxGeometry x="1160" y="60" width="280" height="90" as="geometry"/></mxCell>
 
-        <mxCell id="runtime-lane" value="E. 播放阶段逐帧路径" style="swimlane;html=1;startSize=34;rounded=1;fillColor=#F5F5F5;strokeColor=#666666;fontStyle=1;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="40" y="1050" width="1720" height="250" as="geometry" />
-        </mxCell>
-        <mxCell id="runtime-lut" value="① 8 节点 LUT&#xa;Bi = Li(Di)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;fontStyle=1;" vertex="1" parent="runtime-lane">
-          <mxGeometry x="40" y="80" width="210" height="90" as="geometry" />
-        </mxCell>
-        <mxCell id="edge-guard" value="② 7×7 形态学梯度&#xa;可分离 max/min&#xa;仅保护动态残差 Ei" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=13;fontStyle=1;" vertex="1" parent="runtime-lane">
-          <mxGeometry x="290" y="70" width="250" height="105" as="geometry" />
-        </mxCell>
-        <mxCell id="runtime-residual" value="③ 非主体动态残差&#xa;Ddyn = Bi + Ei·upsample(Ri)&#xa;人物走廊 Ri 已离线置零" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=13;" vertex="1" parent="runtime-lane">
-          <mxGeometry x="585" y="75" width="270" height="95" as="geometry" />
-        </mxCell>
-        <mxCell id="runtime-static" value="④ 静态照片软融合&#xa;W = upsample(M)&#xa;Yi=(1-W)Ddyn+W·upsample(S)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=13;fontStyle=1;" vertex="1" parent="runtime-lane">
-          <mxGeometry x="900" y="65" width="310" height="115" as="geometry" />
-        </mxCell>
-        <mxCell id="runtime-output" value="⑤ 同步深度 Yi&#xa;照片尺度一致&#xa;静态平面稳定、动态边缘受保护" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=13;fontStyle=1;" vertex="1" parent="runtime-lane">
-          <mxGeometry x="1260" y="70" width="290" height="105" as="geometry" />
-        </mxCell>
-        <mxCell id="fallback" value="低置信度回退&#xa;关闭静态/残差 → LUT/affine" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=12;dashed=1;" vertex="1" parent="runtime-lane">
-          <mxGeometry x="1580" y="80" width="110" height="90" as="geometry" />
-        </mxCell>
-
-        <mxCell id="e03" edge="1" parent="1" source="align" target="range" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e05" edge="1" parent="1" source="sample" target="affine" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e06" edge="1" parent="1" source="affine" target="lut" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e07" edge="1" parent="1" source="lut" target="temporal-fit" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e09" edge="1" parent="1" source="temporal-fit" target="residual" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e16" edge="1" parent="1" source="photo-edge" target="mask-regularize" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e17" edge="1" parent="1" source="mask-regularize" target="static-mask" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e23" edge="1" parent="1" source="runtime-lut" target="edge-guard" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e24" edge="1" parent="1" source="edge-guard" target="runtime-residual" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e25" edge="1" parent="1" source="runtime-residual" target="runtime-static" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e27" edge="1" parent="1" source="runtime-static" target="runtime-output" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e28" edge="1" parent="1" source="runtime-output" target="fallback" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=1;dashed=1;"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="sample" target="lut" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="lut" target="base" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="base" target="static" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="static" target="segment" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5" edge="1" parent="1" source="segment" target="offset" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6" edge="1" parent="1" source="runtimeLut" target="warp" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7" edge="1" parent="1" source="warp" target="lookup" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e8" edge="1" parent="1" source="lookup" target="guard" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e9" edge="1" parent="1" source="guard" target="output" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry"/></mxCell>
       </root>
     </mxGraphModel>
   </diagram>

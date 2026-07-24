@@ -42,7 +42,7 @@ def main() -> None:
     photo = np.load(root / "artifacts/depth" / scene / "photo_disparity.npy").astype(np.float32)
     affine = np.load(root / "results" / scene / "affine_depth.npz")["disparity"].astype(np.float32)
     synced = np.load(root / "results" / scene / "synced_depth.npz")["disparity"].astype(np.float32)
-    params = np.load(root / "results" / scene / "v3_parameters.npz")
+    params = np.load(root / "results" / scene / "v4_parameters.npz")
     motion = load_motion(root / "results" / scene / "motion.npz")
     scale = robust_range(photo)
     sync = DepthSync(DepthSyncConfig(depth_mode="disparity"))
@@ -78,8 +78,15 @@ def main() -> None:
             mask = valid & np.isfinite(previous) & np.isfinite(sequence[index])
             return float(np.median(np.abs(sequence[index][mask] - previous[mask])) / scale)
 
-        previous_grid = warp_previous(params["residual_grids"][index - 1], field)
-        grid_delta = float(np.nanmedian(np.abs(params["residual_grids"][index] - previous_grid)) / scale)
+        region_delta = float(
+            np.max(
+                np.abs(
+                    params["region_offsets"][index]
+                    - params["region_offsets"][index - 1]
+                )
+            )
+            / scale
+        )
         x = np.linspace(
             float(np.quantile(raw[index], 0.02)),
             float(np.quantile(raw[index], 0.98)),
@@ -94,13 +101,13 @@ def main() -> None:
                 "raw": error(raw),
                 "affine": error(affine),
                 "lut_base": error(base),
-                "v3": error(synced),
+                "v4": error(synced),
                 "lut_delta": float(np.median(np.abs(current_mapping - previous_mapping)) / scale),
-                "grid_delta": grid_delta,
+                "region_delta": region_delta,
                 "confidence": float(params["confidences"][index]),
             }
         )
-    for key in ("v3", "lut_base", "lut_delta", "grid_delta"):
+    for key in ("v4", "lut_base", "lut_delta", "region_delta"):
         top = sorted(rows, key=lambda row: float(row[key]), reverse=True)[:10]
         print(key, json.dumps(top, ensure_ascii=False))
 

@@ -12,6 +12,7 @@ import numpy as np
 class DepthSyncConfig:
     """Configuration for the lightweight parameter-estimation path."""
 
+    algorithm_version: str = "v4"
     depth_mode: str = "disparity"
     sample_count: int = 2048
     face_sample_fraction: float = 0.30
@@ -63,6 +64,16 @@ class DepthSyncConfig:
     correction_edge_threshold_fraction: float = 0.50
     correction_edge_softness_fraction: float = 0.10
     static_min_confidence: float = 0.30
+    region_grid_shape: tuple[int, int] = (72, 128)
+    region_link_threshold_fraction: float = 0.04
+    region_min_area_fraction: float = 0.01
+    region_max_count: int = 8
+    region_static_support: float = 0.65
+    region_offset_clip_fraction: float = 0.75
+    region_offset_step_fraction: float = 0.75
+    region_offset_smoothing: float = 1.0
+    region_edge_kernel: int = 3
+    region_motion_min_confidence: float = 0.30
     eps: float = 1e-6
 
 
@@ -93,6 +104,10 @@ class FrameParameters:
     static_mask: Optional[np.ndarray] = None
     static_target_grid: Optional[np.ndarray] = None
     guidance_range: float = 0.0
+    region_labels: Optional[np.ndarray] = None
+    region_scales: Optional[np.ndarray] = None
+    region_offsets: Optional[np.ndarray] = None
+    region_shift: Optional[np.ndarray] = None
 
 
 @dataclass
@@ -108,15 +123,31 @@ class SyncResult:
     static_mask: np.ndarray
     static_target_grid: np.ndarray
     guidance_range: float
+    region_labels: np.ndarray
+    region_scales: np.ndarray
+    region_offsets: np.ndarray
+    region_shifts: np.ndarray
 
     @property
     def parameters(self) -> tuple[FrameParameters, ...]:
         return tuple(
             FrameParameters(
-                float(a), float(b), float(c), reason, x, y, residual,
-                self.static_mask, self.static_target_grid, self.guidance_range,
+                float(a),
+                float(b),
+                float(c),
+                reason,
+                x,
+                y,
+                residual,
+                self.static_mask,
+                self.static_target_grid,
+                self.guidance_range,
+                self.region_labels,
+                self.region_scales,
+                region_offset,
+                region_shift,
             )
-            for a, b, c, reason, x, y, residual in zip(
+            for a, b, c, reason, x, y, residual, region_offset, region_shift in zip(
                 self.scales,
                 self.offsets,
                 self.confidences,
@@ -124,6 +155,8 @@ class SyncResult:
                 self.lut_x,
                 self.lut_y,
                 self.residual_grids,
+                self.region_offsets,
+                self.region_shifts,
             )
         )
 
@@ -669,8 +702,258 @@ def _affine_lut(source: np.ndarray, scale: float, offset: float, cfg: DepthSyncC
     return x, (scale * x + offset).astype(np.float32)
 
 
+def _connected_depth_labels(depth: np.ndarray, threshold: float) -> np.ndarray:
+    """Four-neighbour regions whose local disparity step stays below threshold."""
+    height, width = depth.shape
+    count = height * width
+    parents = np.arange(count, dtype=np.int32)
+
+    def find(index: int) -> int:
+        root = index
+        while parents[root] != root:
+            root = int(parents[root])
+        while parents[index] != index:
+            next_index = int(parents[index])
+            parents[index] = root
+            index = next_index
+        return root
+
+    def union(first: int, second: int) -> None:
+        first_root, second_root = find(first), find(second)
+        if first_root != second_root:
+            parents[second_root] = first_root
+
+    for y in range(height):
+        row = y * width
+        for x in range(width):
+            index = row + x
+            value = depth[y, x]
+            if not np.isfinite(value):
+                continue
+            if x > 0 and abs(float(value - depth[y, x - 1])) <= threshold:
+                union(index, index - 1)
+            if y > 0 and abs(float(value - depth[y - 1, x])) <= threshold:
+                union(index, index - width)
+    roots = np.fromiter((find(i) for i in range(count)), np.int32, count=count)
+    _, labels = np.unique(roots, return_inverse=True)
+    return labels.reshape(height, width).astype(np.int32)
+
+
+def _motion_global_shifts(
+    motion: Optional[MotionSequence],
+    frame_count: int,
+    anchor_index: int,
+    cfg: DepthSyncConfig,
+) -> np.ndarray:
+    """Current-frame to anchor normalized translations from robust block MV medians."""
+    shifts = np.zeros((frame_count, 2), np.float32)
+    if motion is None:
+        return shifts
+
+    def median_field(field: np.ndarray, confidence: Optional[np.ndarray]) -> np.ndarray:
+        valid = np.all(np.isfinite(field), axis=-1)
+        if confidence is not None:
+            valid &= confidence >= cfg.region_motion_min_confidence
+        if not np.any(valid):
+            return np.zeros(2, np.float32)
+        return np.median(field[valid], axis=0).astype(np.float32)
+
+    for index in range(anchor_index + 1, frame_count):
+        confidence = (
+            None
+            if motion.confidence_previous is None
+            else motion.confidence_previous[index]
+        )
+        shifts[index] = shifts[index - 1] + median_field(
+            motion.to_previous[index], confidence
+        )
+    for index in range(anchor_index - 1, -1, -1):
+        confidence = (
+            None if motion.confidence_next is None else motion.confidence_next[index]
+        )
+        shifts[index] = shifts[index + 1] + median_field(
+            motion.to_next[index], confidence
+        )
+    return shifts
+
+
+def _warp_region_labels(labels: np.ndarray, shift: np.ndarray) -> np.ndarray:
+    height, width = labels.shape
+    yy, xx = np.mgrid[:height, :width].astype(np.float32)
+    map_x = xx + float(shift[0]) * max(width - 1, 1)
+    map_y = yy + float(shift[1]) * max(height - 1, 1)
+    return cv2.remap(
+        labels,
+        map_x,
+        map_y,
+        cv2.INTER_NEAREST,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=0,
+    )
+
+
+def _build_v4_regions(
+    motion: Optional[MotionSequence],
+    base_outputs: Sequence[np.ndarray],
+    photo: np.ndarray,
+    photo_range: float,
+    anchor_index: int,
+    face_box: Optional[tuple[float, float, float, float]],
+    cfg: DepthSyncConfig,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Fit photo-supervised scalar corrections on large, reliable video regions."""
+    grid_h, grid_w = cfg.region_grid_shape
+    frame_count = len(base_outputs)
+    shifts = _motion_global_shifts(motion, frame_count, anchor_index, cfg)
+    if motion is None or grid_h <= 0 or grid_w <= 0:
+        return (
+            np.zeros((0, 0), np.uint8),
+            np.ones(1, np.float32),
+            np.zeros((frame_count, 1), np.float32),
+            shifts,
+        )
+
+    safe_mask, _subject_barrier = _static_guidance_mask(
+        motion,
+        base_outputs,
+        photo,
+        photo_range,
+        (grid_h, grid_w),
+        cfg,
+        face_box,
+    )
+    anchor_grid = cv2.resize(
+        base_outputs[anchor_index],
+        (grid_w, grid_h),
+        interpolation=cv2.INTER_AREA,
+    )
+    photo_grid = cv2.resize(photo, (grid_w, grid_h), interpolation=cv2.INTER_AREA)
+    components = _connected_depth_labels(
+        anchor_grid,
+        cfg.region_link_threshold_fraction * max(photo_range, cfg.eps),
+    )
+    component_ids, component_areas = np.unique(components, return_counts=True)
+    minimum_area = max(int(grid_h * grid_w * cfg.region_min_area_fraction), 1)
+    order = component_ids[np.argsort(component_areas)[::-1]]
+    region_labels = np.zeros((grid_h, grid_w), np.uint8)
+    targets = [0.0]
+    reliable_static = [False]
+    face_region = np.zeros((grid_h, grid_w), bool)
+    if face_box is not None:
+        x0, y0, x1, y1 = face_box
+        face_region[
+            max(int(y0 * grid_h), 0) : min(int(np.ceil(y1 * grid_h)), grid_h),
+            max(int(x0 * grid_w), 0) : min(int(np.ceil(x1 * grid_w)), grid_w),
+        ] = True
+    for component in order:
+        pixels = components == component
+        area = int(np.count_nonzero(pixels))
+        if area < minimum_area or len(targets) > cfg.region_max_count:
+            continue
+        safe_support = float(np.mean(safe_mask[pixels] >= 0.5))
+        # A constant correction attached to an anchor-frame subject region still
+        # becomes a ghost when the subject moves away. V4 therefore stores only
+        # regions supported as static over the full clip; every other pixel stays
+        # on the global LUT path.
+        if safe_support < cfg.region_static_support or np.any(face_region[pixels]):
+            continue
+        valid = pixels & np.isfinite(photo_grid) & np.isfinite(anchor_grid)
+        if np.count_nonzero(valid) < minimum_area:
+            continue
+        label = len(targets)
+        region_labels[pixels] = label
+        targets.append(float(np.median(photo_grid[valid])))
+        reliable_static.append(True)
+
+    region_count = len(targets)
+    scales = np.ones(region_count, np.float32)
+    offsets = np.zeros((frame_count, region_count), np.float32)
+    if region_count == 1:
+        return region_labels, scales, offsets, shifts
+
+    clip_limit = cfg.region_offset_clip_fraction * max(photo_range, cfg.eps)
+    anchor_offsets = np.zeros(region_count, np.float32)
+    for label in range(1, region_count):
+        pixels = (region_labels == label) & np.isfinite(anchor_grid)
+        if np.any(pixels):
+            anchor_offsets[label] = float(
+                np.clip(
+                    targets[label] - np.median(anchor_grid[pixels]),
+                    -clip_limit,
+                    clip_limit,
+                )
+            )
+            offsets[:, label] = anchor_offsets[label]
+    for frame_index, base in enumerate(base_outputs):
+        warped = _warp_region_labels(region_labels, shifts[frame_index])
+        labels_full = cv2.resize(
+            warped,
+            (base.shape[1], base.shape[0]),
+            interpolation=cv2.INTER_NEAREST,
+        )
+        for label in range(1, region_count):
+            if not reliable_static[label]:
+                continue
+            pixels = (labels_full == label) & np.isfinite(base)
+            if np.any(pixels):
+                offsets[frame_index, label] = float(
+                    np.clip(targets[label] - np.median(base[pixels]), -clip_limit, clip_limit)
+                )
+
+    step_limit = cfg.region_offset_step_fraction * max(photo_range, cfg.eps)
+    alpha = float(np.clip(cfg.region_offset_smoothing, 0.0, 1.0))
+    for label in range(1, region_count):
+        if not reliable_static[label]:
+            continue
+        for direction in (-1, 1):
+            previous = float(offsets[anchor_index, label])
+            for frame_index in range(
+                anchor_index + direction,
+                -1 if direction < 0 else frame_count,
+                direction,
+            ):
+                candidate = (1.0 - alpha) * previous + alpha * float(
+                    offsets[frame_index, label]
+                )
+                candidate = float(
+                    np.clip(candidate, previous - step_limit, previous + step_limit)
+                )
+                offsets[frame_index, label] = candidate
+                previous = candidate
+    return region_labels, scales, offsets, shifts
+
+
+def _apply_v4_regions(
+    base: np.ndarray,
+    labels: np.ndarray,
+    scales: np.ndarray,
+    offsets: np.ndarray,
+    shift: np.ndarray,
+    guidance_range: float,
+    cfg: DepthSyncConfig,
+) -> np.ndarray:
+    if labels.size == 0 or len(scales) <= 1 or len(offsets) <= 1:
+        return base
+    warped = _warp_region_labels(labels, shift)
+    labels_full = cv2.resize(
+        warped,
+        (base.shape[1], base.shape[0]),
+        interpolation=cv2.INTER_NEAREST,
+    )
+    valid_labels = labels_full < min(len(scales), len(offsets))
+    safe_labels = np.where(valid_labels, labels_full, 0)
+    correction = (
+        (scales[safe_labels] - 1.0) * base + offsets[safe_labels]
+    ).astype(np.float32)
+    edge_guard = _correction_edge_guard(
+        base, guidance_range, cfg, cfg.region_edge_kernel
+    )
+    active = (safe_labels > 0).astype(np.float32)
+    return (base + active * edge_guard * correction).astype(np.float32)
+
+
 class DepthSync:
-    """Estimate compact per-frame LUT and residual-grid parameters."""
+    """Estimate compact global-LUT and optional static-region parameters."""
 
     def __init__(self, config: Optional[DepthSyncConfig] = None):
         self.cfg = config or DepthSyncConfig()
@@ -841,6 +1124,54 @@ class DepthSync:
                     for base in base_outputs
                 ]
 
+        if cfg.algorithm_version == "v4":
+            concrete_base_outputs = [base for base in base_outputs if base is not None]
+            assert len(concrete_base_outputs) == n
+            region_labels, region_scales, region_offsets, region_shifts = (
+                _build_v4_regions(
+                    motion,
+                    concrete_base_outputs,
+                    photo,
+                    photo_range,
+                    anchor_index,
+                    face_box,
+                    cfg,
+                )
+            )
+            outputs = [
+                _apply_v4_regions(
+                    base,
+                    region_labels,
+                    region_scales,
+                    region_offsets[index],
+                    region_shifts[index],
+                    photo_range,
+                    cfg,
+                )
+                for index, base in enumerate(concrete_base_outputs)
+            ]
+            empty_grid = np.zeros((n, 0, 0), np.float32)
+            empty_shared = np.zeros((0, 0), np.float32)
+            return SyncResult(
+                np.stack(
+                    [_from_working(x, cfg.depth_mode, cfg.eps) for x in outputs]
+                ).astype(np.float32),
+                scales.astype(np.float32),
+                offsets.astype(np.float32),
+                confidences.astype(np.float32),
+                tuple(reasons),
+                lut_x,
+                lut_y,
+                empty_grid,
+                empty_shared,
+                empty_shared.copy(),
+                photo_range,
+                region_labels,
+                region_scales,
+                region_offsets,
+                region_shifts,
+            )
+
         grid_h, grid_w = cfg.residual_grid_shape
         static_grid_h, static_grid_w = cfg.static_grid_shape
         target_grid_h, target_grid_w = cfg.static_target_shape
@@ -923,6 +1254,10 @@ class DepthSync:
             static_mask,
             static_target_grid,
             photo_range,
+            np.zeros((0, 0), np.uint8),
+            np.ones(1, np.float32),
+            np.zeros((n, 1), np.float32),
+            np.zeros((n, 2), np.float32),
         )
 
     def apply_frame(
@@ -936,6 +1271,21 @@ class DepthSync:
             synced = _apply_lut(working, params.lut_x, params.lut_y, self.cfg.eps)
         else:
             synced = params.scale * working + params.offset
+        if (
+            params.region_labels is not None
+            and params.region_scales is not None
+            and params.region_offsets is not None
+            and params.region_shift is not None
+        ):
+            synced = _apply_v4_regions(
+                synced,
+                params.region_labels,
+                params.region_scales,
+                params.region_offsets,
+                params.region_shift,
+                params.guidance_range,
+                self.cfg,
+            )
         edge_guard = _correction_edge_guard(synced, params.guidance_range, self.cfg)
         if params.residual_grid is not None and params.residual_grid.size:
             residual = cv2.resize(

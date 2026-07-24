@@ -21,6 +21,7 @@ class DepthSyncTest(unittest.TestCase):
         video = np.stack([(low - 0.12 * i) / (0.72 + 0.07 * i) for i in range(t)])
         sync = DepthSync(DepthSyncConfig(depth_mode="depth", min_fit_pixels=64, sample_count=512))
         result = sync(video, photo, anchor)
+        self.assertEqual(result.region_labels.size, 0)
         photo_low = cv2.resize(photo, (48, 36), interpolation=cv2.INTER_AREA)
         before_error = np.mean(np.abs(video[anchor] - photo_low))
         after_error = np.mean(np.abs(result.depths[anchor] - photo_low))
@@ -56,7 +57,12 @@ class DepthSyncTest(unittest.TestCase):
         video = np.stack([raw_anchor + 0.005 * (i - anchor) for i in range(t)])
         spatial_bias = 0.10 * np.sin(2.0 * np.pi * xx / w) * np.cos(np.pi * yy / h)
         photo = 0.25 + 0.7 * raw_anchor + 0.55 * raw_anchor**2 + spatial_bias
-        common = dict(depth_mode="disparity", min_fit_pixels=64, sample_count=1024)
+        common = dict(
+            algorithm_version="v3",
+            depth_mode="disparity",
+            min_fit_pixels=64,
+            sample_count=1024,
+        )
         affine = DepthSync(
             DepthSyncConfig(
                 **common,
@@ -100,6 +106,7 @@ class DepthSyncTest(unittest.TestCase):
         motion = MotionSequence(fields, fields.copy(), confidence, confidence.copy())
         sync = DepthSync(
             DepthSyncConfig(
+                algorithm_version="v3",
                 min_fit_pixels=32,
                 sample_count=256,
                 residual_grid_shape=(9, 12),
@@ -112,6 +119,62 @@ class DepthSyncTest(unittest.TestCase):
         replay = sync.apply_frame(video[0], result.parameters[0])
         np.testing.assert_allclose(replay, result.depths[0], atol=1e-6)
 
+    def test_v4_uses_compact_region_parameters_without_photo_residual(self):
+        t, h, w, anchor = 7, 36, 48, 3
+        video_anchor = np.full((h, w), 0.25, np.float32)
+        video_anchor[:, w // 2 :] = 0.45
+        video_anchor[8:30, 19:31] = 0.85
+        video = np.stack(
+            [video_anchor + 0.005 * (index - anchor) for index in range(t)]
+        )
+        photo = np.full((h, w), 0.30, np.float32)
+        photo[:, w // 2 :] = 0.55
+        photo[8:30, 19:31] = 0.95
+        fields = np.zeros((t, 6, 8, 2), np.float32)
+        confidence = np.ones((t, 6, 8), np.float32)
+        sync = DepthSync(
+            DepthSyncConfig(
+                algorithm_version="v4",
+                min_fit_pixels=32,
+                sample_count=256,
+                region_grid_shape=(h, w),
+                region_min_area_fraction=0.02,
+                region_edge_kernel=1,
+            )
+        )
+        result = sync.offline_prepare(
+            video,
+            photo,
+            anchor,
+            motion=MotionSequence(fields, fields.copy(), confidence, confidence.copy()),
+            face_box=(19 / w, 8 / h, 31 / w, 30 / h),
+        )
+        self.assertEqual(result.residual_grids.size, 0)
+        self.assertEqual(result.static_mask.size, 0)
+        self.assertEqual(result.static_target_grid.size, 0)
+        self.assertGreater(int(np.max(result.region_labels)), 0)
+        self.assertEqual(
+            int(np.max(result.region_labels[8:30, 19:31])),
+            0,
+        )
+        replay = sync.apply_frame(video[0], result.parameters[0])
+        np.testing.assert_allclose(replay, result.depths[0], atol=1e-6)
+        parameters = result.parameters[0]
+        global_only = sync.apply_frame(
+            video[0],
+            FrameParameters(
+                parameters.scale,
+                parameters.offset,
+                parameters.confidence,
+                parameters.fallback_reason,
+                parameters.lut_x,
+                parameters.lut_y,
+                guidance_range=parameters.guidance_range,
+            ),
+        )
+        subject_delta = replay[10:28, 20:30] - global_only[10:28, 20:30]
+        self.assertLess(float(np.max(np.abs(subject_delta))), 1e-6)
+
     def test_isolated_static_confidence_hole_is_filled(self):
         t, h, w = 7, 30, 40
         yy, xx = np.mgrid[:h, :w].astype(np.float32)
@@ -121,6 +184,7 @@ class DepthSyncTest(unittest.TestCase):
         confidence = np.ones((t, 6, 8), np.float32)
         confidence[:, 3, 4] = 0.0
         config = DepthSyncConfig(
+            algorithm_version="v3",
             min_fit_pixels=32,
             sample_count=256,
             static_grid_shape=(6, 8),
@@ -145,6 +209,7 @@ class DepthSyncTest(unittest.TestCase):
         fields = np.zeros((t, 6, 8, 2), np.float32)
         confidence = np.ones((t, 6, 8), np.float32)
         config = DepthSyncConfig(
+            algorithm_version="v3",
             min_fit_pixels=32,
             sample_count=256,
             static_grid_shape=(18, 24),
