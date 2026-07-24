@@ -1,0 +1,16 @@
+{
+  "depthpro": {
+    "repository": "https://github.com/apple/ml-depth-pro",
+    "revision": "9efe5c1def37a26c5367a71df664b18e1306c708",
+    "checkpoint_url": "https://ml-site.cdn-apple.com/models/depth-pro/depth_pro.pt",
+    "local_checkpoint": "models/depth_pro.pt",
+    "sha256": "3EB35CA68168AD3D14CB150F8947A4EDF85589941661FDB2686259C80685C0CE"
+  },
+  "video_depth_anything_small": {
+    "repository": "https://github.com/DepthAnything/Video-Depth-Anything",
+    "revision": "4f5ae23172ba60fd7bc11ef671cca678842c7072",
+    "checkpoint_url": "https://huggingface.co/depth-anything/Video-Depth-Anything-Small/resolve/main/video_depth_anything_vits.pth",
+    "local_checkpoint": "models/video_depth_anything_vits.pth",
+    "sha256": "13379300B739E659F076A59D52E9801BD8D38C541A7E71F73BBCA4DCFB013609"
+  }
+}

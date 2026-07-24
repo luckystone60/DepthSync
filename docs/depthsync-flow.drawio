@@ -1,189 +1,46 @@
-<mxfile host="Electron" agent="Codex">
-  <diagram id="depthsync-main" name="DepthSync处理流程">
-    <mxGraphModel dx="2175" dy="1294" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+<mxfile host="Electron" agent="Codex" version="24.7.17">
+  <diagram id="depthsync-v4-global" name="DepthSync V4 全局 LUT 流程">
+    <mxGraphModel dx="1500" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1500" pageHeight="1000" math="0" shadow="0">
       <root>
-        <mxCell id="0" />
-        <mxCell id="1" parent="0" />
-        <mxCell id="title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=24;fontStyle=1;fontColor=#1F2937;" value="DepthSync：照片深度引导的视频深度尺度对齐与时域一致性" vertex="1">
-          <mxGeometry height="45" width="1100" x="270" y="20" as="geometry" />
-        </mxCell>
-        <mxCell id="lane-input" parent="1" style="swimlane;html=1;startSize=34;horizontal=1;rounded=1;arcSize=8;fillColor=#E8F0FE;strokeColor=#5B8FF9;fontStyle=1;fontSize=15;" value="输入与预处理" vertex="1">
-          <mxGeometry height="170" width="1570" x="40" y="90" as="geometry" />
-        </mxCell>
-        <mxCell id="video-depth" parent="lane-input" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=14;" value="视频深度序列&#xa;Dᵥ[0…T−1]&#xa;低分辨率 / 尺度漂移" vertex="1">
-          <mxGeometry height="85" width="205" x="35" y="55" as="geometry" />
-        </mxCell>
-        <mxCell id="MVSLxm9QIq6Xhho3FrPC-1" edge="1" parent="lane-input" source="photo-depth" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="video-depth" value="">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="photo-depth" parent="lane-input" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=14;" value="拍照深度 Dₚ&#xa;高分辨率 / 细节丰富&#xa;对应视频锚帧 k" vertex="1">
-          <mxGeometry height="85" width="205" x="275" y="55" as="geometry" />
-        </mxCell>
-        <mxCell id="MVSLxm9QIq6Xhho3FrPC-2" edge="1" parent="lane-input" source="rgb-input" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="photo-depth" value="">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="rgb-input" parent="lane-input" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=14;" value="可选 RGB 视频帧 I[0…T−1]&#xa;用于光流与遮挡判断" vertex="1">
-          <mxGeometry height="85" width="220" x="515" y="55" as="geometry" />
-        </mxCell>
-        <mxCell id="domain" parent="lane-input" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=14;" value="统一工作域&#xa;Depth → inverse depth&#xa;无效值掩码 + resize 到照片分辨率" vertex="1">
-          <mxGeometry height="95" width="270" x="810" y="50" as="geometry" />
-        </mxCell>
-        <mxCell id="anchor-split" parent="lane-input" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=14;fontStyle=1;" value="确定锚点 k&#xa;以 k 为中心建立&#xa;前向 / 后向两条传播链" vertex="1">
-          <mxGeometry height="95" width="240" x="1160" y="50" as="geometry" />
-        </mxCell>
-        <mxCell id="e1" edge="1" parent="lane-input" source="video-depth" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="domain">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="137.56" y="40" />
-              <mxPoint x="945" y="40" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="e2" edge="1" parent="lane-input" source="photo-depth" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;entryX=0.25;entryY=0;entryDx=0;entryDy=0;" target="domain">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="377.56" y="50" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="e3" edge="1" parent="lane-input" source="domain" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="anchor-split">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="lane-anchor" parent="1" style="swimlane;html=1;startSize=34;horizontal=1;rounded=1;arcSize=8;fillColor=#EAF7EA;strokeColor=#82B366;fontStyle=1;fontSize=15;" value="锚帧尺度校准与细节融合" vertex="1">
-          <mxGeometry height="200" width="1570" x="40" y="285" as="geometry" />
-        </mxCell>
-        <mxCell id="anchor-pair" parent="lane-anchor" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=14;" value="配对锚帧&#xa;resize(Dᵥ[k]) ↔ Dₚ&#xa;仅使用共同有效像素" vertex="1">
-          <mxGeometry height="90" width="220" x="40" y="62" as="geometry" />
-        </mxCell>
-        <mxCell id="robust-fit" parent="lane-anchor" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=14;fontStyle=1;" value="鲁棒仿射标定&#xa;Dₚ ≈ aₖDᵥ[k] + bₖ&#xa;分位数初始化 + Huber IRLS" vertex="1">
-          <mxGeometry height="100" width="260" x="330" y="57" as="geometry" />
-        </mxCell>
-        <mxCell id="anchor-base" parent="lane-anchor" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=14;" value="锚点基础深度&#xa;D̂base[k] = aₖDᵥ[k] + bₖ" vertex="1">
-          <mxGeometry height="85" width="220" x="665" y="65" as="geometry" />
-        </mxCell>
-        <mxCell id="detail" parent="lane-anchor" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=14;" value="照片高频残差&#xa;R = HP(Dₚ) − HP(D̂base[k])&#xa;抑制噪声，仅补充结构细节" vertex="1">
-          <mxGeometry height="100" width="270" x="955" y="57" as="geometry" />
-        </mxCell>
-        <mxCell id="anchor-output" parent="lane-anchor" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=14;fontStyle=1;" value="同步锚帧&#xa;D̂[k] = D̂base[k] + λdetail·R&#xa;作为双向传播起点" vertex="1">
-          <mxGeometry height="100" width="245" x="1290" y="57" as="geometry" />
-        </mxCell>
-        <mxCell id="e4" edge="1" parent="lane-anchor" source="anchor-pair" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="robust-fit">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e5" edge="1" parent="lane-anchor" source="robust-fit" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="anchor-base">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e6" edge="1" parent="lane-anchor" source="anchor-base" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="detail">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e7" edge="1" parent="lane-anchor" source="detail" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="anchor-output">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="lane-temporal" parent="1" style="swimlane;html=1;startSize=34;horizontal=1;rounded=1;arcSize=8;fillColor=#F3ECF7;strokeColor=#9673A6;fontStyle=1;fontSize=15;" value="逐帧双向时域传播（k→0 与 k→T−1，以下流程对两个方向重复）" vertex="1">
-          <mxGeometry height="350" width="1570" x="40" y="510" as="geometry" />
-        </mxCell>
-        <mxCell id="next-frame" parent="lane-temporal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=14;" value="取相邻帧 i&#xa;上一同步结果 D̂[j]&#xa;当前原始深度 Dᵥ[i]" vertex="1">
-          <mxGeometry height="90" width="210" x="35" y="65" as="geometry" />
-        </mxCell>
-        <mxCell id="has-rgb" parent="lane-temporal" style="rhombus;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=14;fontStyle=1;" value="提供 RGB？" vertex="1">
-          <mxGeometry height="96" width="145" x="300" y="62" as="geometry" />
-        </mxCell>
-        <mxCell id="flow" parent="lane-temporal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=14;" value="Farnebäck 前后向光流&#xa;将 D̂[j] warp 到 i&#xa;光流往返误差 + 光度误差" vertex="1">
-          <mxGeometry height="105" width="255" x="500" y="45" as="geometry" />
-        </mxCell>
-        <mxCell id="fallback" parent="lane-temporal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=14;" value="无 RGB 降级路径&#xa;同位置传播&#xa;采用保守固定置信度" vertex="1">
-          <mxGeometry height="90" width="255" x="500" y="195" as="geometry" />
-        </mxCell>
-        <mxCell id="confidence" parent="lane-temporal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=14;" value="传播深度 Dwarp[i]&#xa;置信度 Cflow&#xa;遮挡 / 越界 / 大运动自动降权" vertex="1">
-          <mxGeometry height="105" width="260" x="820" y="100" as="geometry" />
-        </mxCell>
-        <mxCell id="frame-fit" parent="lane-temporal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=14;fontStyle=1;" value="当前帧尺度重标定&#xa;Dcal[i] = aᵢDᵥ[i] + bᵢ&#xa;低梯度 + 高置信区域做鲁棒拟合" vertex="1">
-          <mxGeometry height="110" width="290" x="1145" y="45" as="geometry" />
-        </mxCell>
-        <mxCell id="adaptive" parent="lane-temporal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=14;fontStyle=1;" value="自适应时域融合&#xa;w = λtemp·Cflow·exp(−深度分歧)&#xa;D̂[i] = wDwarp[i] + (1−w)Dcal[i]" vertex="1">
-          <mxGeometry height="110" width="330" x="1125" y="205" as="geometry" />
-        </mxCell>
-        <mxCell id="more" parent="lane-temporal" style="rhombus;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=14;fontStyle=1;" value="还有相邻帧？" vertex="1">
-          <mxGeometry height="90" width="155" x="870" y="235" as="geometry" />
-        </mxCell>
-        <mxCell id="e8" edge="1" parent="lane-temporal" source="next-frame" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="has-rgb">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e9" edge="1" parent="lane-temporal" source="has-rgb" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="flow" value="是">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e10" edge="1" parent="lane-temporal" source="has-rgb" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="fallback" value="否">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e11" edge="1" parent="lane-temporal" source="flow" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="confidence">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e12" edge="1" parent="lane-temporal" source="fallback" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="confidence">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e13" edge="1" parent="lane-temporal" source="confidence" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="frame-fit">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e14" edge="1" parent="lane-temporal" source="frame-fit" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="adaptive">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e15" edge="1" parent="lane-temporal" source="adaptive" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="more">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e16" edge="1" parent="lane-temporal" source="more" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="next-frame" value="是：令 j=i，继续">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="780" y="330" />
-              <mxPoint x="140" y="330" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="lane-output" parent="1" style="swimlane;html=1;startSize=34;horizontal=1;rounded=1;arcSize=8;fillColor=#F5F5F5;strokeColor=#666666;fontStyle=1;fontSize=15;" value="输出与应用" vertex="1">
-          <mxGeometry height="190" width="1570" x="40" y="885" as="geometry" />
-        </mxCell>
-        <mxCell id="restore" parent="lane-output" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=14;" value="恢复原始深度域&#xa;inverse depth → depth&#xa;输出采用照片深度分辨率" vertex="1">
-          <mxGeometry height="90" width="245" x="160" y="60" as="geometry" />
-        </mxCell>
-        <mxCell id="sequence-output" parent="lane-output" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=14;fontStyle=1;" value="同步深度序列 D̂[0…T−1]&#xa;统一值域与尺度&#xa;照片/视频切换无明显跳变" vertex="1">
-          <mxGeometry height="105" width="290" x="500" y="52" as="geometry" />
-        </mxCell>
-        <mxCell id="diagnostics" parent="lane-output" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=14;" value="诊断信息&#xa;逐帧 scales / offsets / confidences&#xa;用于阈值监控和异常回退" vertex="1">
-          <mxGeometry height="105" width="295" x="885" y="52" as="geometry" />
-        </mxCell>
-        <mxCell id="bokeh" parent="lane-output" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=14;fontStyle=1;" value="Live Photo 人像虚化&#xa;视频播放与拍照帧共享深度尺度&#xa;提升动态虚化连续性" vertex="1">
-          <mxGeometry height="105" width="260" x="1270" y="52" as="geometry" />
-        </mxCell>
-        <mxCell id="e17" edge="1" parent="lane-output" source="restore" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="sequence-output">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e18" edge="1" parent="lane-output" source="sequence-output" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="diagnostics">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e19" edge="1" parent="lane-output" source="diagnostics" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="bokeh">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="cross1" edge="1" parent="1" source="anchor-split" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#9673A6;" target="anchor-pair" value="锚点数据">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="1320" y="250" />
-              <mxPoint x="190.11" y="250" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="cross2" edge="1" parent="1" source="anchor-output" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#9673A6;" target="next-frame" value="双向初始化">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="cross3" edge="1" parent="1" source="rgb-input" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#D6B656;" target="has-rgb" value="RGB">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="665" y="240" />
-              <mxPoint x="340" y="240" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="cross4" edge="1" parent="1" source="more" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#82B366;" target="restore" value="否：两方向完成">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="title" value="DepthSync V4：自适应全局单调 LUT" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=24;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="200" y="20" width="1100" height="40" as="geometry"/></mxCell>
+        <mxCell id="subtitle" value="无空间区域标签｜无照片残差传播｜无人物分割 mask｜播放阶段无 MV" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=14;fontColor=#666666;" vertex="1" parent="1"><mxGeometry x="250" y="62" width="1000" height="28" as="geometry"/></mxCell>
+
+        <mxCell id="inputLane" value="A. 输入与统一工作域" style="swimlane;html=1;startSize=34;rounded=1;fillColor=#E8F0FE;strokeColor=#5B8FF9;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="40" y="105" width="1420" height="165" as="geometry"/></mxCell>
+        <mxCell id="video" value="视频 disparity&#xa;T×Hv×Wv，FP16/FP32" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=13;" vertex="1" parent="inputLane"><mxGeometry x="45" y="55" width="240" height="80" as="geometry"/></mxCell>
+        <mxCell id="photo" value="照片 disparity&#xa;高质量锚帧 k&#xa;仅参数准备使用" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;" vertex="1" parent="inputLane"><mxGeometry x="340" y="55" width="250" height="80" as="geometry"/></mxCell>
+        <mxCell id="mv" value="block MV + confidence&#xa;仅约束逐帧全局参数" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=13;" vertex="1" parent="inputLane"><mxGeometry x="645" y="55" width="250" height="80" as="geometry"/></mxCell>
+        <mxCell id="face" value="可选人脸框&#xa;采样与候选评分加权&#xa;不是分割 mask" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=13;" vertex="1" parent="inputLane"><mxGeometry x="950" y="55" width="250" height="80" as="geometry"/></mxCell>
+        <mxCell id="unify" value="几何配准 + disparity 统一&#xa;照片 P10–P90 鲁棒范围" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=13;fontStyle=1;" vertex="1" parent="inputLane"><mxGeometry x="1255" y="50" width="135" height="90" as="geometry"/></mxCell>
+
+        <mxCell id="anchorLane" value="B. 锚帧映射选择" style="swimlane;html=1;startSize=34;rounded=1;fillColor=#EAF7EA;strokeColor=#82B366;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="40" y="300" width="1420" height="220" as="geometry"/></mxCell>
+        <mxCell id="sample" value="低梯度确定性采样&#xa;分位数 + MAD&#xa;鲁棒 affine 回退" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=13;" vertex="1" parent="anchorLane"><mxGeometry x="45" y="70" width="250" height="105" as="geometry"/></mxCell>
+        <mxCell id="candidates" value="并行候选单调 LUT&#xa;8 / 12 / 16 个有效节点&#xa;分箱中位数 + isotonic" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;fontStyle=1;" vertex="1" parent="anchorLane"><mxGeometry x="355" y="65" width="290" height="115" as="geometry"/></mxCell>
+        <mxCell id="score" value="锚帧候选评分&#xa;全图 NMAE + 人脸 ROI NMAE&#xa;选择最低误差形状" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=13;fontStyle=1;" vertex="1" parent="anchorLane"><mxGeometry x="705" y="65" width="290" height="115" as="geometry"/></mxCell>
+        <mxCell id="canonical" value="重采样为定长 16 节点&#xa;整段固定非线性形状" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=13;fontStyle=1;" vertex="1" parent="anchorLane"><mxGeometry x="1055" y="70" width="300" height="105" as="geometry"/></mxCell>
+
+        <mxCell id="temporalLane" value="C. 从锚点双向准备逐帧参数" style="swimlane;html=1;startSize=34;rounded=1;fillColor=#FFF8E6;strokeColor=#D6B656;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="40" y="550" width="1420" height="180" as="geometry"/></mxCell>
+        <mxCell id="premap" value="固定 LUT(Di)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;" vertex="1" parent="temporalLane"><mxGeometry x="70" y="65" width="220" height="75" as="geometry"/></mxCell>
+        <mxCell id="correspond" value="block MV 稀疏相邻对应&#xa;confidence 门控" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=13;" vertex="1" parent="temporalLane"><mxGeometry x="355" y="60" width="270" height="85" as="geometry"/></mxCell>
+        <mxCell id="fit" value="每帧仅拟合小 scale + offset&#xa;置信度平滑 + 逐帧限幅" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=13;fontStyle=1;" vertex="1" parent="temporalLane"><mxGeometry x="690" y="55" width="310" height="95" as="geometry"/></mxCell>
+        <mxCell id="lock" value="锚点附近锁定&#xa;向两侧渐进解锁" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=13;" vertex="1" parent="temporalLane"><mxGeometry x="1065" y="60" width="270" height="85" as="geometry"/></mxCell>
+
+        <mxCell id="runtimeLane" value="D. 端侧播放路径" style="swimlane;html=1;startSize=34;rounded=1;fillColor=#F5F5F5;strokeColor=#666666;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="40" y="760" width="1420" height="180" as="geometry"/></mxCell>
+        <mxCell id="runtimeInput" value="视频深度 Di" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=13;" vertex="1" parent="runtimeLane"><mxGeometry x="70" y="65" width="200" height="75" as="geometry"/></mxCell>
+        <mxCell id="runtimeLut" value="16 节点 LUT&#xa;一次线性插值" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;fontStyle=1;" vertex="1" parent="runtimeLane"><mxGeometry x="340" y="60" width="240" height="85" as="geometry"/></mxCell>
+        <mxCell id="runtimeAffine" value="逐帧 scalei / offseti" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=13;" vertex="1" parent="runtimeLane"><mxGeometry x="650" y="65" width="250" height="75" as="geometry"/></mxCell>
+        <mxCell id="runtimeOutput" value="同步深度 Yi&#xa;全图同一映射，无空间接缝" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=13;fontStyle=1;" vertex="1" parent="runtimeLane"><mxGeometry x="970" y="55" width="330" height="95" as="geometry"/></mxCell>
+
+        <mxCell id="e1" edge="1" parent="1" source="sample" target="candidates" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="candidates" target="score" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="score" target="canonical" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="premap" target="correspond" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5" edge="1" parent="1" source="correspond" target="fit" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6" edge="1" parent="1" source="fit" target="lock" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7" edge="1" parent="1" source="runtimeInput" target="runtimeLut" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e8" edge="1" parent="1" source="runtimeLut" target="runtimeAffine" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e9" edge="1" parent="1" source="runtimeAffine" target="runtimeOutput" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeWidth=2;"><mxGeometry relative="1" as="geometry"/></mxCell>
       </root>
     </mxGraphModel>
   </diagram>
