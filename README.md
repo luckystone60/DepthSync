@@ -62,3 +62,29 @@ python -m depthsync.depth_visualization
 - `depth_visualization/anchor_*_gray16.png`：16-bit 灰度深度可视化图。
 
 汇总指标写入 `reports/validation.md`。测试 MP4、模型权重、`artifacts/` 和 `results/` 均被 Git 忽略，不会提交大文件。
+
+## V5 光流准备阶段
+
+V5 保留 V4 全局 LUT 作为基础深度，只在拍摄完成后的准备阶段运行
+SEA-RAFT-S。模型计算相邻帧双向光流和不确定度，DepthSync 再通过前后向
+一致性过滤遮挡，把锚帧的 `64×36` 局部 scale/offset/confidence 参数场沿
+可信轨迹传播。播放阶段不运行模型；置信度为零时逐像素回退 V4。
+
+官方源码、权重版本和 SHA-256 固定在 `config/model-sources.json`。准备环境：
+
+```powershell
+git clone https://github.com/princeton-vl/SEA-RAFT.git third_party\SEA-RAFT
+git -C third_party\SEA-RAFT checkout 9137517ba24e628442aec097d3afe71d03503b75
+python -c "from pathlib import Path; from shutil import copy2; from huggingface_hub import hf_hub_download; Path('models').mkdir(exist_ok=True); copy2(hf_hub_download(repo_id='MemorySlices/Tartan-C-T-TSKH-spring540x960-S', filename='model.safetensors', revision='31b9b4b711bd2d0d38cb99d93ba144beb2dc92'), 'models/sea_raft_s.safetensors')"
+Get-FileHash -Algorithm SHA256 models\sea_raft_s.safetensors
+```
+
+期望权重哈希为
+`D6A75E47F2630BA6C354CE84A322E24C3D9DEF668A6956F340A054B9A3211908`。
+生成三段 90 帧光流缓存：
+
+```powershell
+python tools\run_flow_model.py --scenes 01 02 03 --device cuda
+```
+
+模型权重、第三方源码和生成的光流仍位于 Git 忽略目录，不进入普通提交。
