@@ -124,6 +124,28 @@ def test_local_field_sequence_rejects_out_of_range_confidence() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("channel", "value", "message"),
+    [("delta_scale", 0.51, "scale"), ("offset_norm", -0.36, "offset")],
+)
+def test_local_field_sequence_rejects_out_of_contract_parameters(
+    channel: str,
+    value: float,
+    message: str,
+) -> None:
+    shape = (1, 2, 3)
+    values = {
+        "delta_scale": np.zeros(shape, np.float32),
+        "offset_norm": np.zeros(shape, np.float32),
+        "confidence": np.ones(shape, np.float32),
+        "depth_low": np.ones(shape, np.float32),
+    }
+    values[channel][0, 0, 0] = value
+
+    with pytest.raises(ValueError, match=message):
+        LocalFieldSequence(**values, photo_range=1.0)
+
+
 def test_local_fit_separates_regions_that_share_the_same_base_value() -> None:
     """Replacing local fits with one global offset must make this fail."""
     h, w = 72, 128

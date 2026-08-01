@@ -10,6 +10,10 @@ import numpy as np
 from .flow import DenseFlowSequence
 
 
+FIELD_DELTA_SCALE_BOUNDS = (-0.5, 0.5)
+FIELD_OFFSET_NORM_BOUNDS = (-0.35, 0.35)
+
+
 @dataclass(frozen=True)
 class LocalFieldConfig:
     grid_shape: tuple[int, int] = (36, 64)
@@ -64,6 +68,16 @@ class LocalFieldSequence:
             raise ValueError("local field channels must be finite")
         if np.any((self.confidence < 0.0) | (self.confidence > 1.0)):
             raise ValueError("local field confidence must be within [0,1]")
+        if np.any(
+            (self.delta_scale < FIELD_DELTA_SCALE_BOUNDS[0])
+            | (self.delta_scale > FIELD_DELTA_SCALE_BOUNDS[1])
+        ):
+            raise ValueError("local field scale is outside the serialized contract")
+        if np.any(
+            (self.offset_norm < FIELD_OFFSET_NORM_BOUNDS[0])
+            | (self.offset_norm > FIELD_OFFSET_NORM_BOUNDS[1])
+        ):
+            raise ValueError("local field offset is outside the serialized contract")
 
     def frame(self, index: int) -> LocalFieldFrame:
         return LocalFieldFrame(
@@ -96,6 +110,16 @@ def _validate_frame(field: LocalFieldFrame) -> None:
         raise ValueError("local field channels must be finite")
     if np.any((field.confidence < 0.0) | (field.confidence > 1.0)):
         raise ValueError("local field confidence must be within [0,1]")
+    if np.any(
+        (field.delta_scale < FIELD_DELTA_SCALE_BOUNDS[0])
+        | (field.delta_scale > FIELD_DELTA_SCALE_BOUNDS[1])
+    ):
+        raise ValueError("local field scale is outside the serialized contract")
+    if np.any(
+        (field.offset_norm < FIELD_OFFSET_NORM_BOUNDS[0])
+        | (field.offset_norm > FIELD_OFFSET_NORM_BOUNDS[1])
+    ):
+        raise ValueError("local field offset is outside the serialized contract")
 
 
 def _depth_guided_upsample(
