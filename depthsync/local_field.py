@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import cv2
 import numpy as np
 
 
@@ -83,7 +84,6 @@ def apply_local_field(
     config: LocalFieldConfig,
 ) -> np.ndarray:
     """Apply one field, preserving V4 bit-exactly when confidence is zero."""
-    del config
     base = np.asarray(base, dtype=np.float32)
     if base.ndim != 2:
         raise ValueError("base must have shape [H,W]")
@@ -91,7 +91,176 @@ def apply_local_field(
     confidence = np.nan_to_num(field.confidence, nan=0.0)
     if float(np.max(confidence, initial=0.0)) <= 0.0:
         return base.copy()
-    raise NotImplementedError("nonzero local-field playback is added with anchor fitting")
+    height, width = base.shape
+    size = (width, height)
+    delta_scale = cv2.resize(
+        np.nan_to_num(field.delta_scale, nan=0.0).astype(np.float32),
+        size,
+        interpolation=cv2.INTER_LINEAR,
+    )
+    offset_norm = cv2.resize(
+        np.nan_to_num(field.offset_norm, nan=0.0).astype(np.float32),
+        size,
+        interpolation=cv2.INTER_LINEAR,
+    )
+    weight = np.clip(
+        cv2.resize(
+            np.clip(confidence, 0.0, 1.0).astype(np.float32),
+            size,
+            interpolation=cv2.INTER_LINEAR,
+        ),
+        0.0,
+        1.0,
+    )
+    scale = np.clip(
+        1.0 + delta_scale,
+        config.scale_bounds[0],
+        config.scale_bounds[1],
+    )
+    offset_norm = np.clip(
+        offset_norm,
+        -config.offset_bound_fraction,
+        config.offset_bound_fraction,
+    )
+    correction = (scale - 1.0) * base + offset_norm * field.photo_range
+    return (base + weight * correction).astype(np.float32)
+
+
+def _photo_range(photo: np.ndarray, eps: float) -> float:
+    finite = photo[np.isfinite(photo)]
+    if finite.size == 0:
+        return 1.0
+    value = float(np.quantile(finite, 0.9) - np.quantile(finite, 0.1))
+    return max(value, eps)
+
+
+def _odd_window(value: float) -> int:
+    result = max(9, int(round(value)))
+    return result if result % 2 else result + 1
+
+
+def _smooth_supported(values: np.ndarray, confidence: np.ndarray) -> np.ndarray:
+    kernel = np.asarray([1.0, 2.0, 1.0], np.float32)
+    weighted = values * confidence
+    numerator = cv2.sepFilter2D(weighted, -1, kernel, kernel)
+    denominator = cv2.sepFilter2D(confidence, -1, kernel, kernel)
+    smoothed = numerator / np.maximum(denominator, 1e-6)
+    return np.where(confidence > 0, smoothed, 0.0).astype(np.float32)
+
+
+def fit_anchor_field(
+    base_anchor: np.ndarray,
+    photo_anchor: np.ndarray,
+    config: LocalFieldConfig,
+) -> LocalFieldFrame:
+    """Fit overlapping robust local affine models relative to a V4 anchor."""
+    base = np.asarray(base_anchor, dtype=np.float32)
+    photo = np.asarray(photo_anchor, dtype=np.float32)
+    if base.ndim != 2 or photo.shape != base.shape:
+        raise ValueError("base_anchor and photo_anchor must have equal [H,W] shapes")
+    gh, gw = config.grid_shape
+    if gh <= 0 or gw <= 0:
+        raise ValueError("grid_shape must be positive")
+    height, width = base.shape
+    photo_range = _photo_range(photo, config.eps)
+    scale = np.ones((gh, gw), np.float32)
+    offset = np.zeros((gh, gw), np.float32)
+    confidence = np.zeros((gh, gw), np.float32)
+    window_h = _odd_window(2.5 * height / gh)
+    window_w = _odd_window(2.5 * width / gw)
+    centers_y = (np.arange(gh, dtype=np.float32) + 0.5) * height / gh
+    centers_x = (np.arange(gw, dtype=np.float32) + 0.5) * width / gw
+
+    for gy, center_y in enumerate(centers_y):
+        y0 = max(0, int(round(center_y)) - window_h // 2)
+        y1 = min(height, y0 + window_h)
+        y0 = max(0, y1 - window_h)
+        for gx, center_x in enumerate(centers_x):
+            x0 = max(0, int(round(center_x)) - window_w // 2)
+            x1 = min(width, x0 + window_w)
+            x0 = max(0, x1 - window_w)
+            source = base[y0:y1, x0:x1].reshape(-1)
+            target = photo[y0:y1, x0:x1].reshape(-1)
+            valid = np.isfinite(source) & np.isfinite(target)
+            count = int(np.count_nonzero(valid))
+            if count < config.min_fit_pixels:
+                continue
+            source = source[valid].astype(np.float64)
+            target = target[valid].astype(np.float64)
+            design = np.column_stack((source, np.ones_like(source)))
+            weights = np.ones(count, np.float64)
+            solution = np.asarray([1.0, 0.0], np.float64)
+            lhs = np.eye(2, dtype=np.float64)
+            for _ in range(2):
+                lhs = design.T @ (weights[:, None] * design)
+                lhs += np.diag([config.scale_ridge, config.offset_ridge])
+                rhs = design.T @ (weights * target)
+                rhs[0] += config.scale_ridge
+                solution = np.linalg.solve(lhs, rhs)
+                residual = target - design @ solution
+                median = float(np.median(residual))
+                mad = float(np.median(np.abs(residual - median)))
+                robust_scale = max(1.4826 * mad, 0.01 * photo_range, config.eps)
+                normalized = np.abs(residual - median) / (4.685 * robust_scale)
+                weights = np.square(np.clip(1.0 - normalized**2, 0.0, 1.0))
+            fitted_scale = float(
+                np.clip(solution[0], config.scale_bounds[0], config.scale_bounds[1])
+            )
+            fitted_offset = float(
+                np.clip(
+                    solution[1],
+                    -config.offset_bound_fraction * photo_range,
+                    config.offset_bound_fraction * photo_range,
+                )
+            )
+            # Re-optimize after box constraints. A low-variance window can put
+            # the entire correction in the offset and then lose it to clipping;
+            # alternating the two bounded coordinates preserves the best fit.
+            for _ in range(2):
+                scale_denominator = float(
+                    np.sum(weights * source * source) + config.scale_ridge
+                )
+                fitted_scale = float(
+                    np.clip(
+                        (
+                            np.sum(weights * source * (target - fitted_offset))
+                            + config.scale_ridge
+                        )
+                        / max(scale_denominator, config.eps),
+                        config.scale_bounds[0],
+                        config.scale_bounds[1],
+                    )
+                )
+                fitted_offset = float(
+                    np.clip(
+                        np.median(target - fitted_scale * source),
+                        -config.offset_bound_fraction * photo_range,
+                        config.offset_bound_fraction * photo_range,
+                    )
+                )
+            residual = target - (fitted_scale * source + fitted_offset)
+            support = min(1.0, count / float(window_h * window_w))
+            residual_score = np.exp(
+                -float(np.median(np.abs(residual))) / (0.08 * photo_range + config.eps)
+            )
+            condition = float(np.linalg.cond(lhs))
+            condition_score = 1.0 / (1.0 + max(np.log10(max(condition, 1.0)), 0.0) / 12.0)
+            scale[gy, gx] = fitted_scale
+            offset[gy, gx] = fitted_offset
+            confidence[gy, gx] = float(
+                np.clip(support * residual_score * condition_score, 0.0, 1.0)
+            )
+
+    delta_scale = _smooth_supported(scale - 1.0, confidence)
+    offset_norm = _smooth_supported(offset / photo_range, confidence)
+    depth_low = cv2.resize(base, (gw, gh), interpolation=cv2.INTER_AREA)
+    return LocalFieldFrame(
+        delta_scale=delta_scale,
+        offset_norm=offset_norm,
+        confidence=confidence,
+        depth_low=depth_low.astype(np.float32),
+        photo_range=photo_range,
+    )
 
 
 def save_local_fields(path: Path | str, fields: LocalFieldSequence) -> None:

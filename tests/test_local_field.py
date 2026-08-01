@@ -6,6 +6,7 @@ from depthsync.local_field import (
     LocalFieldConfig,
     LocalFieldSequence,
     apply_local_field,
+    fit_anchor_field,
     load_local_fields,
     save_local_fields,
 )
@@ -65,3 +66,37 @@ def test_field_round_trip_preserves_fp16_payload(tmp_path) -> None:
         fields.depth_low.astype(np.float16),
     )
     assert loaded.photo_range == fields.photo_range
+
+
+def test_local_fit_separates_regions_that_share_the_same_base_value() -> None:
+    """Replacing local fits with one global offset must make this fail."""
+    h, w = 72, 128
+    base = np.full((h, w), 0.45, np.float32)
+    photo = base.copy()
+    photo[:, : w // 2] += 0.12
+    photo[:, w // 2 :] -= 0.08
+    config = LocalFieldConfig(grid_shape=(18, 32))
+
+    field = fit_anchor_field(base, photo, config)
+    output = apply_local_field(base, field, config)
+    global_output = base + np.median(photo - base)
+
+    assert np.mean(np.abs(output - photo)) < 0.5 * np.mean(
+        np.abs(global_output - photo)
+    )
+
+
+def test_invalid_anchor_windows_stay_exact_identity() -> None:
+    """Filling unsupported windows from neighbors must make this fail."""
+    base = np.full((24, 32), np.nan, np.float32)
+    photo = np.ones((24, 32), np.float32)
+
+    field = fit_anchor_field(
+        base,
+        photo,
+        LocalFieldConfig(grid_shape=(6, 8)),
+    )
+
+    assert not np.any(field.delta_scale)
+    assert not np.any(field.offset_norm)
+    assert not np.any(field.confidence)
