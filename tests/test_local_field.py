@@ -142,14 +142,12 @@ def test_revealed_background_stays_exact_identity() -> None:
     assert np.max(np.abs(fields.offset_norm[revealed])) < 1e-6
 
 
-def test_flat_background_regularization_removes_checkerboard_steps() -> None:
-    """Removing spatial regularization on flat surfaces must make this fail."""
+def test_high_confidence_transport_does_not_rewrite_fitted_parameters() -> None:
+    """Per-frame re-regularization of an already fitted field must make this fail."""
     config = LocalFieldConfig(
         grid_shape=(18, 32),
         spatial_iterations=8,
         spatial_weight=4.0,
-        temporal_smoothing=1.0,
-        max_offset_step_fraction=0.35,
     )
     gh, gw = config.grid_shape
     base = np.full((3, gh, gw), 0.4, np.float32)
@@ -175,7 +173,48 @@ def test_flat_background_regularization_removes_checkerboard_steps() -> None:
         config,
     )
 
-    assert np.quantile(np.abs(np.diff(fields.offset_norm[0], axis=1)), 0.99) < 0.02
+    np.testing.assert_allclose(fields.offset_norm[0], offset, atol=1e-6)
+
+
+def test_reliable_flow_does_not_cumulatively_attenuate_field_confidence() -> None:
+    """Multiplying 0.9 flow confidence across the sequence must make this fail."""
+    config = LocalFieldConfig(grid_shape=(6, 8))
+    base = np.full((6, 6, 8), 0.4, np.float32)
+    rgb = np.full((6, 6, 8, 3), 128, np.uint8)
+    anchor = LocalFieldFrame(
+        np.zeros((6, 8), np.float32),
+        np.full((6, 8), 0.1, np.float32),
+        np.full((6, 8), 0.8, np.float32),
+        base[2],
+        1.0,
+    )
+    flow = _zero_flow(6, (6, 8))
+    flow.confidence_next.fill(0.9)
+    flow.confidence_previous.fill(0.9)
+
+    fields = propagate_local_fields(base, rgb, anchor, 2, flow, config)
+
+    np.testing.assert_allclose(fields.confidence, 0.8, atol=1e-6)
+
+
+def test_uncertain_flow_uses_continuous_visibility_fallback() -> None:
+    """Replacing soft visibility with a binary threshold must make this fail."""
+    config = LocalFieldConfig(grid_shape=(1, 3))
+    base = np.full((2, 1, 3), 0.4, np.float32)
+    rgb = np.zeros((2, 1, 3, 3), np.uint8)
+    anchor = LocalFieldFrame(
+        np.zeros((1, 3), np.float32),
+        np.full((1, 3), 0.1, np.float32),
+        np.ones((1, 3), np.float32),
+        base[0],
+        1.0,
+    )
+    flow = _zero_flow(2, (1, 3))
+    flow.confidence_previous[0, 0] = [0.05, 0.15, 0.25]
+
+    fields = propagate_local_fields(base, rgb, anchor, 0, flow, config)
+
+    np.testing.assert_allclose(fields.confidence[1, 0], [0.0, 0.5, 1.0], atol=1e-6)
 
 
 def test_field_step_clamps_scale_and_normalized_offset_independently() -> None:

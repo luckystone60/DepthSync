@@ -96,6 +96,8 @@ class DepthSyncConfig:
     local_temporal_smoothing: float = 0.65
     local_max_scale_step: float = 0.03
     local_max_offset_step_fraction: float = 0.02
+    local_flow_confidence_low: float = 0.05
+    local_flow_confidence_high: float = 0.25
     eps: float = 1e-6
 
 
@@ -1458,6 +1460,8 @@ class DepthSync:
             temporal_smoothing=cfg.local_temporal_smoothing,
             max_scale_step=cfg.local_max_scale_step,
             max_offset_step_fraction=cfg.local_max_offset_step_fraction,
+            flow_confidence_low=cfg.local_flow_confidence_low,
+            flow_confidence_high=cfg.local_flow_confidence_high,
             eps=cfg.eps,
         )
         anchor_field = fit_anchor_field(

@@ -26,6 +26,8 @@ class LocalFieldConfig:
     temporal_smoothing: float = 0.65
     max_scale_step: float = 0.03
     max_offset_step_fraction: float = 0.02
+    flow_confidence_low: float = 0.05
+    flow_confidence_high: float = 0.25
     upsample_depth_sigma_fraction: float = 0.04
     eps: float = 1e-6
 
@@ -322,55 +324,6 @@ def _remap_grid(values: np.ndarray, current_to_previous: np.ndarray) -> np.ndarr
     )
 
 
-def _regularize_field(
-    data_q: np.ndarray,
-    data_confidence: np.ndarray,
-    rgb_grid: np.ndarray,
-    depth_grid: np.ndarray,
-    photo_range: float,
-    config: LocalFieldConfig,
-) -> np.ndarray:
-    active = data_confidence > config.eps
-    q = np.where(active[..., None], data_q, 0.0).astype(np.float32)
-    rgb = rgb_grid.astype(np.float32)
-    depth = depth_grid.astype(np.float32)
-    depth_sigma = max(config.depth_sigma_fraction * photo_range, config.eps)
-    directions = ((0, 1), (0, -1), (1, 0), (-1, 0))
-    for _ in range(config.spatial_iterations):
-        numerator = data_confidence[..., None] * data_q
-        denominator = data_confidence.copy()
-        for dy, dx in directions:
-            neighbor_q = np.roll(q, shift=(dy, dx), axis=(0, 1))
-            neighbor_active = np.roll(active, shift=(dy, dx), axis=(0, 1))
-            neighbor_rgb = np.roll(rgb, shift=(dy, dx), axis=(0, 1))
-            neighbor_depth = np.roll(depth, shift=(dy, dx), axis=(0, 1))
-            valid = active & neighbor_active
-            if dy == 1:
-                valid[0, :] = False
-            elif dy == -1:
-                valid[-1, :] = False
-            if dx == 1:
-                valid[:, 0] = False
-            elif dx == -1:
-                valid[:, -1] = False
-            rgb_delta = np.mean(np.abs(rgb - neighbor_rgb), axis=-1)
-            depth_delta = np.abs(depth - neighbor_depth)
-            pair_weight = config.spatial_weight * np.exp(
-                -rgb_delta / max(config.rgb_sigma, config.eps)
-                -depth_delta / depth_sigma
-            )
-            pair_weight *= valid.astype(np.float32)
-            numerator += pair_weight[..., None] * neighbor_q
-            denominator += pair_weight
-        denominator += config.identity_weight * (1.0 - data_confidence)
-        jacobi = numerator / np.maximum(denominator[..., None], config.eps)
-        # Damped Jacobi suppresses the checkerboard eigenmode that otherwise
-        # converges very slowly on large, flat planes.
-        q = 0.5 * q + 0.5 * jacobi
-        q[~active] = 0.0
-    return q.astype(np.float32)
-
-
 def propagate_local_fields(
     base_depths: np.ndarray,
     rgb_frames: np.ndarray,
@@ -400,12 +353,6 @@ def propagate_local_fields(
             for frame in base
         ]
     ).astype(np.float32)
-    rgb_low = np.stack(
-        [
-            cv2.resize(frame, (gw, gh), interpolation=cv2.INTER_AREA)
-            for frame in rgb
-        ]
-    )
     q = np.zeros((frame_count, gh, gw, 2), np.float32)
     confidence = np.zeros((frame_count, gh, gw), np.float32)
     q[anchor_index, ..., 0] = anchor_field.delta_scale
@@ -433,30 +380,26 @@ def propagate_local_fields(
             warped_confidence = _remap_grid(
                 confidence[previous_index], current_to_previous
             )
+            visibility = np.clip(
+                (flow_confidence - config.flow_confidence_low)
+                / max(
+                    config.flow_confidence_high - config.flow_confidence_low,
+                    config.eps,
+                ),
+                0.0,
+                1.0,
+            )
+            visibility = visibility * visibility * (3.0 - 2.0 * visibility)
             data_confidence = np.clip(
-                warped_confidence * flow_confidence,
+                warped_confidence * visibility,
                 0.0,
                 1.0,
             )
             active = data_confidence > config.eps
-            candidate = _regularize_field(
-                warped_q,
-                data_confidence,
-                rgb_low[index],
-                depth_low[index],
-                anchor_field.photo_range,
-                config,
-            )
-            candidate = clamp_field_step(warped_q, candidate, config)
-            alpha = np.clip(
-                config.temporal_smoothing * data_confidence,
-                0.0,
-                1.0,
-            )
-            q[index] = (
-                alpha[..., None] * candidate
-                + (1.0 - alpha[..., None]) * warped_q
-            )
+            # The anchor fit is regularized once. Re-regularizing on each RGB
+            # frame rewrites a field that is already aligned by flow and causes
+            # temporal breathing. Trusted trajectories transport it unchanged.
+            q[index] = warped_q
             q[index, ~active] = 0.0
             confidence[index] = np.where(active, data_confidence, 0.0)
             previous_index = index
