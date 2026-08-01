@@ -11,7 +11,86 @@ import cv2
 import numpy as np
 
 from .core import DepthSync, DepthSyncConfig, MotionSequence, SyncResult
+from .flow import DenseFlowSequence, load_flow
 from .motion import estimate_block_motion, load_motion, save_motion
+
+
+def flat_correction_gradient_p99(
+    synced: np.ndarray,
+    base: np.ndarray,
+    flat_threshold: float,
+    region: np.ndarray | None = None,
+) -> float:
+    """P99 correction step on edges that are flat in the V4 base depth."""
+    synced = np.asarray(synced, dtype=np.float32)
+    base = np.asarray(base, dtype=np.float32)
+    if synced.shape != base.shape or synced.ndim != 2:
+        raise ValueError("synced and base must have equal [H,W] shapes")
+    correction = synced - base
+    values: list[np.ndarray] = []
+    for axis in (0, 1):
+        base_delta = np.diff(base, axis=axis)
+        correction_delta = np.diff(correction, axis=axis)
+        valid = (
+            np.isfinite(base_delta)
+            & np.isfinite(correction_delta)
+            & (np.abs(base_delta) < flat_threshold)
+        )
+        if region is not None:
+            region_pair = (
+                region[:-1] & region[1:]
+                if axis == 0
+                else region[:, :-1] & region[:, 1:]
+            )
+            valid &= region_pair
+        values.append(np.abs(correction_delta[valid]))
+    finite = np.concatenate([value for value in values if value.size]) if any(
+        value.size for value in values
+    ) else np.zeros(0, np.float32)
+    return float(np.quantile(finite, 0.99)) if finite.size else 0.0
+
+
+def _gate(actual: float | int, limit: float | int) -> dict[str, float | int | bool]:
+    return {"actual": actual, "limit": limit, "passed": bool(actual <= limit)}
+
+
+def classify_v5_gates(
+    scene: str,
+    metrics: dict[str, float | int],
+) -> dict[str, dict[str, float | int | bool]]:
+    """Classify the numeric V5 acceptance gates without hiding scene failures."""
+    gates: dict[str, dict[str, float | int | bool]] = {
+        "all_parameter_bytes": _gate(
+            metrics["v5_parameter_bytes"],
+            1_244_160,
+        )
+    }
+    if scene == "01":
+        gates["01_subject_anchor_nmae"] = _gate(
+            metrics["v5_subject_anchor_nmae"],
+            0.80 * metrics["v4_subject_anchor_nmae"],
+        )
+        gates["01_wall_flat_correction_gradient_p99"] = _gate(
+            metrics["v5_wall_flat_correction_gradient_p99"],
+            1.10 * metrics["v4_wall_flat_correction_gradient_p99"] + 1e-6,
+        )
+    elif scene == "02":
+        gates["02_subject_temporal"] = _gate(
+            metrics["v5_subject_temporal_p95"],
+            1.05 * metrics["v4_subject_temporal_p95"],
+        )
+        gates["02_revealed_background_confidence"] = _gate(
+            metrics["v5_revealed_background_confidence_p95"],
+            0.05,
+        )
+    elif scene == "03":
+        gates["03_excess_jump_max"] = _gate(
+            metrics["v5_excess_jump_max"],
+            metrics["v4_excess_jump_max"] + 2e-4,
+        )
+    else:
+        raise ValueError(f"unknown validation scene: {scene}")
+    return gates
 
 
 def _region_mask(shape: tuple[int, int], box: tuple[float, float, float, float]) -> np.ndarray:
@@ -19,6 +98,22 @@ def _region_mask(shape: tuple[int, int], box: tuple[float, float, float, float])
     x0, y0, x1, y1 = box
     yy, xx = np.mgrid[:height, :width]
     return (xx >= x0 * width) & (xx < x1 * width) & (yy >= y0 * height) & (yy < y1 * height)
+
+
+def _read_rgb_video(path: Path) -> np.ndarray:
+    capture = cv2.VideoCapture(str(path))
+    if not capture.isOpened():
+        raise ValueError(f"Cannot open video: {path}")
+    frames: list[np.ndarray] = []
+    while True:
+        ok, frame = capture.read()
+        if not ok:
+            break
+        frames.append(frame)
+    capture.release()
+    if not frames:
+        raise ValueError(f"Video has no readable frames: {path}")
+    return np.stack(frames)
 
 
 def _robust_range(depth: np.ndarray) -> float:
@@ -116,9 +211,18 @@ def _aligned_switch_error(
 
 
 def _run(sync: DepthSync, video_depth: np.ndarray, photo: np.ndarray, anchor: int, motion: MotionSequence,
-         face_box: tuple[float, float, float, float]) -> tuple[SyncResult, float, float]:
+         face_box: tuple[float, float, float, float], rgb_frames: np.ndarray | None = None,
+         dense_flow: DenseFlowSequence | None = None) -> tuple[SyncResult, float, float]:
     start = time.perf_counter()
-    result = sync.offline_prepare(video_depth, photo, anchor, motion=motion, face_box=face_box)
+    result = sync.offline_prepare(
+        video_depth,
+        photo,
+        anchor,
+        motion=motion,
+        face_box=face_box,
+        rgb_frames=rgb_frames,
+        dense_flow=dense_flow,
+    )
     prepare_ms = (time.perf_counter() - start) * 1000.0 / len(video_depth)
     repeats = 5
     start = time.perf_counter()
@@ -136,6 +240,8 @@ def evaluate_scene(
     result_root: Path,
     face_box: tuple[float, float, float, float],
     static_box: tuple[float, float, float, float] | None = None,
+    flow_root: Path | None = None,
+    algorithm_version: str = "v4",
 ) -> dict[str, float | int | str]:
     clip_dir = clip_root / scene
     depth_dir = depth_root / scene
@@ -166,6 +272,26 @@ def evaluate_scene(
     v3_sync = DepthSync(DepthSyncConfig(depth_mode="disparity"))
     v1, v1_prepare_ms, v1_apply_ms = _run(v1_sync, video_depth, photo, anchor, motion, face_box)
     v3, v3_prepare_ms, v3_apply_ms = _run(v3_sync, video_depth, photo, anchor, motion, face_box)
+    v5: SyncResult | None = None
+    v5_prepare_ms = 0.0
+    v5_apply_ms = 0.0
+    dense_flow: DenseFlowSequence | None = None
+    if algorithm_version == "v5":
+        if flow_root is None:
+            raise ValueError("flow_root is required for V5 evaluation")
+        rgb_frames = _read_rgb_video(clip_dir / "clip.mp4")
+        dense_flow = load_flow(flow_root / scene / "sea_raft_s_flow.npz")
+        v5_sync = DepthSync(DepthSyncConfig(algorithm_version="v5", depth_mode="disparity"))
+        v5, v5_prepare_ms, v5_apply_ms = _run(
+            v5_sync,
+            video_depth,
+            photo,
+            anchor,
+            motion,
+            face_box,
+            rgb_frames,
+            dense_flow,
+        )
     temporal_scale = _robust_range(photo_low) + 1e-6
     v1_temporal = _temporal_errors(v1.depths, motion, temporal_scale)
     v3_temporal = _temporal_errors(v3.depths, motion, temporal_scale)
@@ -185,6 +311,16 @@ def evaluate_scene(
     v3_subject_temporal = _temporal_errors(
         v3.depths, motion, temporal_scale, subject_region
     )
+    v5_temporal = None
+    v5_subject_temporal = None
+    if v5 is not None:
+        v5_temporal = _temporal_errors(v5.depths, motion, temporal_scale)
+        v5_subject_temporal = _temporal_errors(
+            v5.depths,
+            motion,
+            temporal_scale,
+            subject_region,
+        )
     interior = slice(4, max(len(v3_temporal) - 5, 5))
     excess = v3_temporal[interior] - v1_temporal[interior]
     excess_index = int(np.nanargmax(excess)) + 5
@@ -290,12 +426,96 @@ def evaluate_scene(
         metrics["v4_static_edge_fallback_width_median"] = (
             float(np.median(fallback_widths)) if fallback_widths else float("nan")
         )
+    if v5 is not None and v5.local_fields is not None:
+        assert v5_temporal is not None and v5_subject_temporal is not None
+        v5_excess = v5_temporal[interior] - v1_temporal[interior]
+        v5_excess_index = int(np.nanargmax(v5_excess)) + 5
+        subject_photo = photo_low[subject_region]
+        subject_v4 = v3.depths[anchor][subject_region]
+        subject_v5 = v5.depths[anchor][subject_region]
+        flat_threshold = 0.01 * temporal_scale
+        wall_region = (
+            _region_mask(photo_low.shape, static_box)
+            if static_box is not None
+            else np.ones(photo_low.shape, bool)
+        )
+        revealed_confidence: list[np.ndarray] = []
+        if dense_flow is not None:
+            grid_h, grid_w = v5.local_fields.confidence.shape[1:]
+            for frame_index in range(max(anchor + 1, 75), len(video_depth)):
+                pair_confidence = cv2.resize(
+                    dense_flow.confidence_previous[frame_index - 1].astype(np.float32),
+                    (grid_w, grid_h),
+                    interpolation=cv2.INTER_LINEAR,
+                )
+                revealed = pair_confidence < 0.05
+                if np.any(revealed):
+                    revealed_confidence.append(
+                        v5.local_fields.confidence[frame_index][revealed]
+                    )
+        revealed_values = (
+            np.concatenate(revealed_confidence)
+            if revealed_confidence
+            else np.zeros(0, np.float32)
+        )
+        metrics.update(
+            {
+                "v4_subject_anchor_nmae": _anchor_nmae(subject_v4, subject_photo),
+                "v5_subject_anchor_nmae": _anchor_nmae(subject_v5, subject_photo),
+                "v5_anchor_nmae": _anchor_nmae(v5.depths[anchor], photo_low),
+                "v5_temporal_p95": float(
+                    np.nanquantile(v5_temporal[interior], 0.95)
+                ),
+                "v5_subject_temporal_p95": float(
+                    np.nanquantile(v5_subject_temporal[interior], 0.95)
+                ),
+                "v5_excess_jump_max": float(np.nanmax(v5_excess)),
+                "v5_excess_jump_frame": v5_excess_index,
+                "v4_wall_flat_correction_gradient_p99": flat_correction_gradient_p99(
+                    v3.depths[anchor],
+                    video_depth[anchor],
+                    flat_threshold,
+                    wall_region,
+                ),
+                "v5_wall_flat_correction_gradient_p99": flat_correction_gradient_p99(
+                    v5.depths[anchor],
+                    video_depth[anchor],
+                    flat_threshold,
+                    wall_region,
+                ),
+                "v5_revealed_background_confidence_p95": float(
+                    np.quantile(revealed_values, 0.95)
+                )
+                if revealed_values.size
+                else 0.0,
+                "v5_prepare_ms_per_frame": v5_prepare_ms,
+                "v5_apply_ms_per_frame": v5_apply_ms,
+                "v5_parameter_bytes": int(
+                    v5.local_fields.delta_scale.astype(np.float16).nbytes
+                    + v5.local_fields.offset_norm.astype(np.float16).nbytes
+                    + v5.local_fields.confidence.astype(np.float16).nbytes
+                ),
+            }
+        )
+        metrics["v5_gates"] = classify_v5_gates(scene, metrics)  # type: ignore[assignment]
     np.savez_compressed(result_dir / "affine_depth.npz", disparity=v1.depths)
     np.savez_compressed(result_dir / "synced_depth.npz", disparity=v3.depths)
+    np.savez_compressed(result_dir / "v4_depth.npz", disparity=v3.depths)
+    if v5 is not None and v5.local_fields is not None:
+        np.savez_compressed(result_dir / "v5_depth.npz", disparity=v5.depths)
+        np.savez_compressed(
+            result_dir / "v5_parameters.npz",
+            delta_scale=v5.local_fields.delta_scale.astype(np.float16),
+            offset_norm=v5.local_fields.offset_norm.astype(np.float16),
+            confidence=v5.local_fields.confidence.astype(np.float16),
+            depth_low=v5.local_fields.depth_low.astype(np.float16),
+            photo_range=np.float32(v5.local_fields.photo_range),
+        )
     np.savez_compressed(
         result_dir / "temporal_errors.npz",
         v1=v1_temporal,
         v4=v3_temporal,
+        **({"v5": v5_temporal} if v5_temporal is not None else {}),
     )
     np.savez_compressed(
         result_dir / "v4_parameters.npz",
@@ -325,6 +545,49 @@ def evaluate_scene(
 
 def write_report(metrics: list[dict[str, float | int | str]], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    if metrics and "v5_anchor_nmae" in metrics[0]:
+        lines = [
+            "# DepthSync V5 验证结果",
+            "",
+            "V5 使用照片锚帧拟合低分辨率局部 affine 场，再通过双向光流向前后帧纯传输。下表中的时序指标均经过运动补偿；数值越低越好。",
+            "",
+            "| 场景 | 锚帧 NMAE V4→V5 | 主体锚帧 NMAE V4→V5 | 全局时序 P95 V4→V5 | 主体时序 P95 V4→V5 | V5 最大新增跳变 | 参数字节 | Python 回放 ms/帧 |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+        for item in metrics:
+            lines.append(
+                f"| {item['scene']} | {item['v4_anchor_nmae']:.5f}→{item['v5_anchor_nmae']:.5f} | "
+                f"{item['v4_subject_anchor_nmae']:.5f}→{item['v5_subject_anchor_nmae']:.5f} | "
+                f"{item['v4_temporal_p95']:.5f}→{item['v5_temporal_p95']:.5f} | "
+                f"{item['v4_subject_temporal_p95']:.5f}→{item['v5_subject_temporal_p95']:.5f} | "
+                f"{item['v5_excess_jump_max']:.6f}（帧 {item['v5_excess_jump_frame']}） | "
+                f"{item['v5_parameter_bytes']} | {item['v5_apply_ms_per_frame']:.2f} |"
+            )
+        lines.extend(["", "## 验收门槛", ""])
+        for item in metrics:
+            gates = item.get("v5_gates", {})
+            if isinstance(gates, dict):
+                for name, gate in gates.items():
+                    if isinstance(gate, dict):
+                        state = "通过" if gate.get("passed") else "失败"
+                        lines.append(
+                            f"- {item['scene']} / {name}: **{state}**；"
+                            f"actual={gate.get('actual')}, limit={gate.get('limit')}"
+                        )
+        lines.extend(
+            [
+                "",
+                "## 说明",
+                "",
+                "- 01 墙面门槛允许相对 V4 最多 10% 的平坦区修正梯度增量；这是为局部尺度对齐保留的有限空间变化，不允许出现硬分层。关键帧仍需人工检查。",
+                "- V5 参数按三通道 FP16、90 帧、36×64 网格计算，共 1,244,160 字节；`depth_low` 是原型诊断缓存，不属于下发参数。",
+                "- Python 回放耗时包含深度引导局部场上采样，仅供相对比较。端侧应以 C++/NEON、GPU 或 NPU kernel 实测，不能直接用该数值推断手机性能。",
+                "- SEA-RAFT-S 的桌面 CPU 实测约 35–41 秒/90 帧；1–2 秒准备目标必须在目标手机 NPU/GPU 上完成 profiling 后才能确认。",
+                "- 对比视频统一使用 DepthPro 照片深度的 P02–P98 显示范围，避免逐帧自动拉伸掩盖尺度差异。",
+            ]
+        )
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return
     lines = [
         "# DepthSync V4 全局单调 LUT 验证结果",
         "",
@@ -383,7 +646,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--clip-root", type=Path, default=Path("artifacts/clips"))
     parser.add_argument("--depth-root", type=Path, default=Path("artifacts/depth"))
+    parser.add_argument("--flow-root", type=Path, default=Path("artifacts/flow"))
     parser.add_argument("--result-root", type=Path, default=Path("results"))
+    parser.add_argument("--algorithm-version", choices=("v4", "v5"), default="v4")
     parser.add_argument("--scenes", nargs="+", default=["01", "02", "03"])
     parser.add_argument("--scene-config", type=Path, default=Path("config/validation-scenes.json"))
     parser.add_argument("--report", type=Path, default=Path("reports/validation.md"))
@@ -397,6 +662,8 @@ def main() -> None:
             args.result_root,
             tuple(scene_config[scene]["face_box"]),
             tuple(scene_config[scene]["static_box"]) if "static_box" in scene_config[scene] else None,
+            args.flow_root,
+            args.algorithm_version,
         )
         for scene in args.scenes
     ]
