@@ -7,6 +7,16 @@ from typing import Optional, Sequence
 import cv2
 import numpy as np
 
+from .flow import DenseFlowSequence
+from .local_field import (
+    LocalFieldConfig,
+    LocalFieldFrame,
+    LocalFieldSequence,
+    apply_local_field,
+    fit_anchor_field,
+    propagate_local_fields,
+)
+
 
 @dataclass(frozen=True)
 class DepthSyncConfig:
@@ -76,6 +86,16 @@ class DepthSyncConfig:
     region_shape_open_radius: int = 2
     region_edge_kernel: int = 1
     region_motion_min_confidence: float = 0.30
+    local_grid_shape: tuple[int, int] = (36, 64)
+    local_scale_bounds: tuple[float, float] = (0.5, 1.5)
+    local_offset_bound_fraction: float = 0.35
+    local_min_fit_pixels: int = 24
+    local_spatial_iterations: int = 5
+    local_spatial_weight: float = 2.0
+    local_identity_weight: float = 1.0
+    local_temporal_smoothing: float = 0.65
+    local_max_scale_step: float = 0.03
+    local_max_offset_step_fraction: float = 0.02
     eps: float = 1e-6
 
 
@@ -110,6 +130,7 @@ class FrameParameters:
     region_scales: Optional[np.ndarray] = None
     region_offsets: Optional[np.ndarray] = None
     region_shift: Optional[np.ndarray] = None
+    local_field: Optional[LocalFieldFrame] = None
 
 
 @dataclass
@@ -129,6 +150,7 @@ class SyncResult:
     region_scales: np.ndarray
     region_offsets: np.ndarray
     region_shifts: np.ndarray
+    local_fields: Optional[LocalFieldSequence] = None
 
     @property
     def parameters(self) -> tuple[FrameParameters, ...]:
@@ -148,8 +170,9 @@ class SyncResult:
                 self.region_scales,
                 region_offset,
                 region_shift,
+                None if self.local_fields is None else self.local_fields.frame(index),
             )
-            for a, b, c, reason, x, y, residual, region_offset, region_shift in zip(
+            for index, (a, b, c, reason, x, y, residual, region_offset, region_shift) in enumerate(zip(
                 self.scales,
                 self.offsets,
                 self.confidences,
@@ -159,7 +182,7 @@ class SyncResult:
                 self.residual_grids,
                 self.region_offsets,
                 self.region_shifts,
-            )
+            ))
         )
 
 
@@ -976,6 +999,8 @@ class DepthSync:
 
     def __init__(self, config: Optional[DepthSyncConfig] = None):
         self.cfg = config or DepthSyncConfig()
+        if self.cfg.algorithm_version not in {"v1", "v3", "v4", "v5"}:
+            raise ValueError("algorithm_version must be 'v1', 'v3', 'v4', or 'v5'")
         if self.cfg.mapping_mode not in {"affine", "lut"}:
             raise ValueError("mapping_mode must be 'affine' or 'lut'")
         if self.cfg.lut_nodes < 2:
@@ -989,6 +1014,8 @@ class DepthSync:
         motion: Optional[MotionSequence] = None,
         face_box: Optional[tuple[float, float, float, float]] = None,
         photo_to_video_grid: Optional[np.ndarray] = None,
+        rgb_frames: Optional[Sequence[np.ndarray]] = None,
+        dense_flow: Optional[DenseFlowSequence] = None,
     ) -> SyncResult:
         if len(video_depths) == 0:
             raise ValueError("video_depths is empty")
@@ -996,6 +1023,43 @@ class DepthSync:
             raise ValueError("anchor_index is out of range")
         if motion is not None and (len(motion.to_previous) != len(video_depths) or len(motion.to_next) != len(video_depths)):
             raise ValueError("motion fields and video_depths must have equal length")
+        if rgb_frames is not None and len(rgb_frames) != len(video_depths):
+            raise ValueError("rgb_frames and video_depths must have equal length")
+        if self.cfg.algorithm_version == "v5":
+            v4_sync = DepthSync(replace(self.cfg, algorithm_version="v4"))
+            v4 = v4_sync.offline_prepare(
+                video_depths,
+                photo_depth,
+                anchor_index,
+                motion=motion,
+                face_box=face_box,
+                photo_to_video_grid=photo_to_video_grid,
+            )
+            if rgb_frames is None or dense_flow is None:
+                return replace(
+                    v4,
+                    fallback_reasons=tuple(
+                        "v5_flow_unavailable" for _ in video_depths
+                    ),
+                    local_fields=None,
+                )
+            try:
+                return self._add_v5_local_fields(
+                    v4,
+                    photo_depth,
+                    anchor_index,
+                    rgb_frames,
+                    dense_flow,
+                    photo_to_video_grid,
+                )
+            except (ValueError, np.linalg.LinAlgError):
+                return replace(
+                    v4,
+                    fallback_reasons=tuple(
+                        "v5_invalid_local_data" for _ in video_depths
+                    ),
+                    local_fields=None,
+                )
 
         cfg, n = self.cfg, len(video_depths)
         shape = video_depths[anchor_index].shape[:2]
@@ -1363,6 +1427,63 @@ class DepthSync:
             np.zeros((n, 2), np.float32),
         )
 
+    def _add_v5_local_fields(
+        self,
+        v4: SyncResult,
+        photo_depth: np.ndarray,
+        anchor_index: int,
+        rgb_frames: Sequence[np.ndarray],
+        dense_flow: DenseFlowSequence,
+        photo_to_video_grid: Optional[np.ndarray],
+    ) -> SyncResult:
+        """Attach V5 local fields to an already finalized V4 result."""
+        cfg = self.cfg
+        base_working = np.stack(
+            [_to_working(depth, cfg.depth_mode, cfg.eps) for depth in v4.depths]
+        ).astype(np.float32)
+        shape = base_working.shape[1:]
+        photo_working = _align_photo(
+            _to_working(photo_depth, cfg.depth_mode, cfg.eps),
+            shape,
+            photo_to_video_grid,
+        )
+        local_config = LocalFieldConfig(
+            grid_shape=cfg.local_grid_shape,
+            scale_bounds=cfg.local_scale_bounds,
+            offset_bound_fraction=cfg.local_offset_bound_fraction,
+            min_fit_pixels=cfg.local_min_fit_pixels,
+            spatial_iterations=cfg.local_spatial_iterations,
+            spatial_weight=cfg.local_spatial_weight,
+            identity_weight=cfg.local_identity_weight,
+            temporal_smoothing=cfg.local_temporal_smoothing,
+            max_scale_step=cfg.local_max_scale_step,
+            max_offset_step_fraction=cfg.local_max_offset_step_fraction,
+            eps=cfg.eps,
+        )
+        anchor_field = fit_anchor_field(
+            base_working[anchor_index],
+            photo_working,
+            local_config,
+        )
+        local_fields = propagate_local_fields(
+            base_working,
+            np.asarray(rgb_frames),
+            anchor_field,
+            anchor_index,
+            dense_flow.isolate_scene_cuts(),
+            local_config,
+        )
+        outputs = np.stack(
+            [
+                apply_local_field(base, local_fields.frame(index), local_config)
+                for index, base in enumerate(base_working)
+            ]
+        )
+        depths = np.stack(
+            [_from_working(output, cfg.depth_mode, cfg.eps) for output in outputs]
+        ).astype(np.float32)
+        return replace(v4, depths=depths, local_fields=local_fields)
+
     def apply_frame(
         self,
         depth: np.ndarray,
@@ -1389,6 +1510,15 @@ class DepthSync:
                 params.guidance_range,
                 self.cfg,
             )
+        if params.local_field is not None:
+            local_config = LocalFieldConfig(
+                grid_shape=params.local_field.delta_scale.shape,
+                scale_bounds=self.cfg.local_scale_bounds,
+                offset_bound_fraction=self.cfg.local_offset_bound_fraction,
+                upsample_depth_sigma_fraction=0.04,
+                eps=self.cfg.eps,
+            )
+            synced = apply_local_field(synced, params.local_field, local_config)
         edge_guard = _correction_edge_guard(synced, params.guidance_range, self.cfg)
         if params.residual_grid is not None and params.residual_grid.size:
             residual = cv2.resize(
@@ -1431,9 +1561,14 @@ class DepthSync:
         photo_depth: np.ndarray,
         anchor_index: int,
         rgb_frames: Optional[Sequence[np.ndarray]] = None,
+        dense_flow: Optional[DenseFlowSequence] = None,
     ) -> SyncResult:
-        # rgb_frames remains accepted for source compatibility; no dense flow is
-        # computed by the edge path. Motion must be supplied explicitly.
         if rgb_frames is not None and len(rgb_frames) != len(video_depths):
             raise ValueError("rgb_frames and video_depths must have equal length")
-        return self.offline_prepare(video_depths, photo_depth, anchor_index)
+        return self.offline_prepare(
+            video_depths,
+            photo_depth,
+            anchor_index,
+            rgb_frames=rgb_frames,
+            dense_flow=dense_flow,
+        )
