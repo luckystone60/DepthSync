@@ -1,5 +1,22 @@
 # DepthSync
 
+当前效果优先版本为 V5：以 V4 全局单调 LUT 作为稳定基线，在照片锚帧拟合 `36×64` 局部 affine 场，并通过 SEA-RAFT-S 双向光流在拍后准备阶段向整段视频传播。播放阶段不运行模型，低置信度区域严格回退 V4。
+
+- 端侧算法、数据规格、内存/算力和回退策略：[`docs/depthsync-v5-algorithm.md`](docs/depthsync-v5-algorithm.md)
+- 可编辑处理流程图：[`docs/depthsync-flow.drawio`](docs/depthsync-flow.drawio)
+- 流程图预览：[`docs/depthsync-flow.png`](docs/depthsync-flow.png)
+- 三段 90 帧验证报告：[`reports/validation-v5.md`](reports/validation-v5.md)
+
+V5 验证与可视化：
+
+```powershell
+python tools\run_flow_model.py --scenes 01 02 03 --device cuda
+python -m depthsync.evaluate --algorithm-version v5 --flow-root artifacts\flow --result-root results\v5 --report reports\validation-v5.md
+python -m depthsync.depth_visualization --flow-root artifacts\flow --result-root results\v5
+```
+
+每个场景会生成 `depth_comparison_v5.mp4`、`field_diagnostics_v5.mp4`、V5 彩色/灰度深度视频和指定关键帧 PNG。模型、光流、深度缓存及视频均位于 Git 忽略目录，不提交到远端。
+
 DepthSync 使用 Live Photo 拍照帧的高质量深度作为锚点，把轻量视频深度序列对齐到照片深度的值域与局部结构，同时保持视频模型原有的时域一致性。
 
 当前 V4 面向端侧实现：照片深度只监督一个全局单调 LUT，不再使用运行时空间掩码、区域标签、照片残差图或照片目标层。离线在 8/12/16 个有效节点中自动选择误差最小的 LUT 形状，并统一序列化为 16 节点。播放阶段不运行深度模型、不需要人物分割 mask，也不计算光流。
