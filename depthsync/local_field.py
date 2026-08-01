@@ -7,6 +7,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from .flow import DenseFlowSequence
+
 
 @dataclass(frozen=True)
 class LocalFieldConfig:
@@ -260,6 +262,219 @@ def fit_anchor_field(
         confidence=confidence,
         depth_low=depth_low.astype(np.float32),
         photo_range=photo_range,
+    )
+
+
+def clamp_field_step(
+    previous: np.ndarray,
+    candidate: np.ndarray,
+    config: LocalFieldConfig,
+) -> np.ndarray:
+    """Clamp trajectory changes for ``[..., scale_delta, offset_norm]``."""
+    previous = np.asarray(previous, dtype=np.float32)
+    candidate = np.asarray(candidate, dtype=np.float32)
+    if previous.shape != candidate.shape or previous.shape[-1] != 2:
+        raise ValueError("field steps must have equal [...,2] shapes")
+    delta = candidate - previous
+    delta[..., 0] = np.clip(
+        delta[..., 0], -config.max_scale_step, config.max_scale_step
+    )
+    delta[..., 1] = np.clip(
+        delta[..., 1],
+        -config.max_offset_step_fraction,
+        config.max_offset_step_fraction,
+    )
+    return (previous + delta).astype(np.float32)
+
+
+def _resize_flow_to_grid(
+    flow: np.ndarray,
+    confidence: np.ndarray,
+    grid_shape: tuple[int, int],
+) -> tuple[np.ndarray, np.ndarray]:
+    source_h, source_w = flow.shape[:2]
+    grid_h, grid_w = grid_shape
+    resized = cv2.resize(
+        flow.astype(np.float32),
+        (grid_w, grid_h),
+        interpolation=cv2.INTER_LINEAR,
+    )
+    resized[..., 0] *= grid_w / max(source_w, 1)
+    resized[..., 1] *= grid_h / max(source_h, 1)
+    resized_confidence = cv2.resize(
+        confidence.astype(np.float32),
+        (grid_w, grid_h),
+        interpolation=cv2.INTER_LINEAR,
+    )
+    return resized, np.clip(resized_confidence, 0.0, 1.0)
+
+
+def _remap_grid(values: np.ndarray, current_to_previous: np.ndarray) -> np.ndarray:
+    height, width = current_to_previous.shape[:2]
+    yy, xx = np.mgrid[:height, :width].astype(np.float32)
+    return cv2.remap(
+        values.astype(np.float32),
+        xx + current_to_previous[..., 0],
+        yy + current_to_previous[..., 1],
+        interpolation=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=0,
+    )
+
+
+def _regularize_field(
+    data_q: np.ndarray,
+    data_confidence: np.ndarray,
+    rgb_grid: np.ndarray,
+    depth_grid: np.ndarray,
+    photo_range: float,
+    config: LocalFieldConfig,
+) -> np.ndarray:
+    active = data_confidence > config.eps
+    q = np.where(active[..., None], data_q, 0.0).astype(np.float32)
+    rgb = rgb_grid.astype(np.float32)
+    depth = depth_grid.astype(np.float32)
+    depth_sigma = max(config.depth_sigma_fraction * photo_range, config.eps)
+    directions = ((0, 1), (0, -1), (1, 0), (-1, 0))
+    for _ in range(config.spatial_iterations):
+        numerator = data_confidence[..., None] * data_q
+        denominator = data_confidence.copy()
+        for dy, dx in directions:
+            neighbor_q = np.roll(q, shift=(dy, dx), axis=(0, 1))
+            neighbor_active = np.roll(active, shift=(dy, dx), axis=(0, 1))
+            neighbor_rgb = np.roll(rgb, shift=(dy, dx), axis=(0, 1))
+            neighbor_depth = np.roll(depth, shift=(dy, dx), axis=(0, 1))
+            valid = active & neighbor_active
+            if dy == 1:
+                valid[0, :] = False
+            elif dy == -1:
+                valid[-1, :] = False
+            if dx == 1:
+                valid[:, 0] = False
+            elif dx == -1:
+                valid[:, -1] = False
+            rgb_delta = np.mean(np.abs(rgb - neighbor_rgb), axis=-1)
+            depth_delta = np.abs(depth - neighbor_depth)
+            pair_weight = config.spatial_weight * np.exp(
+                -rgb_delta / max(config.rgb_sigma, config.eps)
+                -depth_delta / depth_sigma
+            )
+            pair_weight *= valid.astype(np.float32)
+            numerator += pair_weight[..., None] * neighbor_q
+            denominator += pair_weight
+        denominator += config.identity_weight * (1.0 - data_confidence)
+        jacobi = numerator / np.maximum(denominator[..., None], config.eps)
+        # Damped Jacobi suppresses the checkerboard eigenmode that otherwise
+        # converges very slowly on large, flat planes.
+        q = 0.5 * q + 0.5 * jacobi
+        q[~active] = 0.0
+    return q.astype(np.float32)
+
+
+def propagate_local_fields(
+    base_depths: np.ndarray,
+    rgb_frames: np.ndarray,
+    anchor_field: LocalFieldFrame,
+    anchor_index: int,
+    flow: DenseFlowSequence,
+    config: LocalFieldConfig,
+) -> LocalFieldSequence:
+    """Propagate an anchor parameter field along trusted adjacent flow."""
+    base = np.asarray(base_depths, dtype=np.float32)
+    rgb = np.asarray(rgb_frames)
+    if base.ndim != 3 or rgb.ndim != 4 or len(base) != len(rgb):
+        raise ValueError("base_depths and rgb_frames must have equal frame counts")
+    frame_count = len(base)
+    if not 0 <= anchor_index < frame_count:
+        raise ValueError("anchor_index is out of range")
+    if flow.to_next.shape[0] != frame_count - 1:
+        raise ValueError("flow must contain T-1 adjacent pairs")
+    gh, gw = config.grid_shape
+    _validate_frame(anchor_field)
+    if anchor_field.delta_scale.shape != (gh, gw):
+        raise ValueError("anchor field shape must equal config.grid_shape")
+
+    depth_low = np.stack(
+        [
+            cv2.resize(frame, (gw, gh), interpolation=cv2.INTER_AREA)
+            for frame in base
+        ]
+    ).astype(np.float32)
+    rgb_low = np.stack(
+        [
+            cv2.resize(frame, (gw, gh), interpolation=cv2.INTER_AREA)
+            for frame in rgb
+        ]
+    )
+    q = np.zeros((frame_count, gh, gw, 2), np.float32)
+    confidence = np.zeros((frame_count, gh, gw), np.float32)
+    q[anchor_index, ..., 0] = anchor_field.delta_scale
+    q[anchor_index, ..., 1] = anchor_field.offset_norm
+    confidence[anchor_index] = np.clip(anchor_field.confidence, 0.0, 1.0)
+
+    for direction in (-1, 1):
+        previous_index = anchor_index
+        stop = -1 if direction < 0 else frame_count
+        for index in range(anchor_index + direction, stop, direction):
+            pair = index if direction < 0 else index - 1
+            if direction < 0:
+                current_to_previous, flow_confidence = _resize_flow_to_grid(
+                    flow.to_next[pair], flow.confidence_next[pair], (gh, gw)
+                )
+            else:
+                current_to_previous, flow_confidence = _resize_flow_to_grid(
+                    flow.to_previous[pair],
+                    flow.confidence_previous[pair],
+                    (gh, gw),
+                )
+            if flow.scene_cuts[pair]:
+                flow_confidence = np.zeros_like(flow_confidence)
+            warped_q = _remap_grid(q[previous_index], current_to_previous)
+            warped_confidence = _remap_grid(
+                confidence[previous_index], current_to_previous
+            )
+            data_confidence = np.clip(
+                warped_confidence * flow_confidence,
+                0.0,
+                1.0,
+            )
+            active = data_confidence > config.eps
+            candidate = _regularize_field(
+                warped_q,
+                data_confidence,
+                rgb_low[index],
+                depth_low[index],
+                anchor_field.photo_range,
+                config,
+            )
+            candidate = clamp_field_step(warped_q, candidate, config)
+            alpha = np.clip(
+                config.temporal_smoothing * data_confidence,
+                0.0,
+                1.0,
+            )
+            q[index] = (
+                alpha[..., None] * candidate
+                + (1.0 - alpha[..., None]) * warped_q
+            )
+            q[index, ~active] = 0.0
+            confidence[index] = np.where(active, data_confidence, 0.0)
+            previous_index = index
+
+    q[..., 0] = np.clip(
+        q[..., 0], config.scale_bounds[0] - 1.0, config.scale_bounds[1] - 1.0
+    )
+    q[..., 1] = np.clip(
+        q[..., 1],
+        -config.offset_bound_fraction,
+        config.offset_bound_fraction,
+    )
+    return LocalFieldSequence(
+        delta_scale=q[..., 0],
+        offset_norm=q[..., 1],
+        confidence=confidence,
+        depth_low=depth_low,
+        photo_range=anchor_field.photo_range,
     )
 
 
