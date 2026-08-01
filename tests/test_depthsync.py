@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -8,6 +9,7 @@ import numpy as np
 from depthsync import DepthSync, DepthSyncConfig, FrameParameters, MotionSequence
 from depthsync.core import _largest_open_component, _static_guidance_mask
 from depthsync.flow import DenseFlowSequence
+from depthsync.local_field import load_local_fields, save_local_fields
 from depthsync.validation import prepare_validation_clip
 from depthsync.depth_visualization import colorize_depth, depth_to_gray16, normalize_depth
 
@@ -401,6 +403,24 @@ class DepthSyncTest(unittest.TestCase):
         )
         replay = sync.apply_frame(video[1], result.parameters[1])
         np.testing.assert_allclose(replay, result.depths[1], atol=1e-6)
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "v5_fields.npz"
+            self.assertIsNotNone(result.local_fields)
+            save_local_fields(path, result.local_fields)
+            loaded = load_local_fields(path)
+            serialized_replay = np.stack(
+                [
+                    sync.apply_frame(
+                        depth,
+                        replace(params, local_field=loaded.frame(index)),
+                    )
+                    for index, (depth, params) in enumerate(
+                        zip(video, result.parameters)
+                    )
+                ]
+            )
+        np.testing.assert_allclose(serialized_replay, result.depths, atol=3e-4)
 
     def test_validation_clip_has_exact_timeline(self):
         with TemporaryDirectory() as directory:

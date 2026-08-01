@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import numpy as np
 
-from depthsync.evaluate import classify_v5_gates, flat_correction_gradient_p99
+from depthsync.evaluate import (
+    classify_v5_gates,
+    flat_correction_gradient_p99,
+    temporal_frame_indices,
+)
 
 
 def test_flat_correction_gradient_ignores_real_depth_edges() -> None:
@@ -59,3 +63,9 @@ def test_scene_01_wall_gate_allows_small_smooth_correction_cost() -> None:
     gates = classify_v5_gates("01", metrics)
 
     assert gates["01_wall_flat_correction_gradient_p99"]["passed"] is True
+
+
+def test_tail_frame_config_maps_to_temporal_error_indices() -> None:
+    indices = temporal_frame_indices([0, 1, 75, 89, 100], frame_count=90)
+
+    np.testing.assert_array_equal(indices, [0, 74, 88])

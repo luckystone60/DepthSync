@@ -100,6 +100,19 @@ def _region_mask(shape: tuple[int, int], box: tuple[float, float, float, float])
     return (xx >= x0 * width) & (xx < x1 * width) & (yy >= y0 * height) & (yy < y1 * height)
 
 
+def temporal_frame_indices(
+    frames: list[int] | tuple[int, ...] | None,
+    frame_count: int,
+) -> np.ndarray:
+    """Map destination frame numbers to indices in a T-1 temporal-error array."""
+    if frames is None:
+        return np.zeros(0, np.int32)
+    return np.asarray(
+        sorted({int(frame) - 1 for frame in frames if 1 <= int(frame) < frame_count}),
+        np.int32,
+    )
+
+
 def _read_rgb_video(path: Path) -> np.ndarray:
     capture = cv2.VideoCapture(str(path))
     if not capture.isOpened():
@@ -240,6 +253,8 @@ def evaluate_scene(
     result_root: Path,
     face_box: tuple[float, float, float, float],
     static_box: tuple[float, float, float, float] | None = None,
+    subject_box: tuple[float, float, float, float] | None = None,
+    tail_frames: list[int] | None = None,
     flow_root: Path | None = None,
     algorithm_version: str = "v4",
 ) -> dict[str, float | int | str]:
@@ -295,16 +310,15 @@ def evaluate_scene(
     temporal_scale = _robust_range(photo_low) + 1e-6
     v1_temporal = _temporal_errors(v1.depths, motion, temporal_scale)
     v3_temporal = _temporal_errors(v3.depths, motion, temporal_scale)
-    x0, y0, x1, y1 = face_box
-    subject_region = _region_mask(
-        photo_low.shape,
-        (
+    if subject_box is None:
+        x0, y0, x1, y1 = face_box
+        subject_box = (
             max(x0 - 0.20, 0.0),
             max(y0 - 0.20, 0.0),
             min(x1 + 0.20, 1.0),
             min(y1 + 0.50, 1.0),
-        ),
-    )
+        )
+    subject_region = _region_mask(photo_low.shape, subject_box)
     v1_subject_temporal = _temporal_errors(
         v1.depths, motion, temporal_scale, subject_region
     )
@@ -322,6 +336,10 @@ def evaluate_scene(
             subject_region,
         )
     interior = slice(4, max(len(v3_temporal) - 5, 5))
+    tail_indices = temporal_frame_indices(tail_frames, len(video_depth))
+    subject_temporal_selection: slice | np.ndarray = (
+        tail_indices if tail_indices.size else interior
+    )
     excess = v3_temporal[interior] - v1_temporal[interior]
     excess_index = int(np.nanargmax(excess)) + 5
 
@@ -343,10 +361,10 @@ def evaluate_scene(
         "v1_temporal_p95": float(np.nanquantile(v1_temporal[interior], 0.95)),
         "v4_temporal_p95": float(np.nanquantile(v3_temporal[interior], 0.95)),
         "v1_subject_temporal_p95": float(
-            np.nanquantile(v1_subject_temporal[interior], 0.95)
+            np.nanquantile(v1_subject_temporal[subject_temporal_selection], 0.95)
         ),
         "v4_subject_temporal_p95": float(
-            np.nanquantile(v3_subject_temporal[interior], 0.95)
+            np.nanquantile(v3_subject_temporal[subject_temporal_selection], 0.95)
         ),
         "v4_excess_jump_max": float(np.nanmax(excess)),
         "v4_excess_jump_frame": excess_index,
@@ -467,7 +485,7 @@ def evaluate_scene(
                     np.nanquantile(v5_temporal[interior], 0.95)
                 ),
                 "v5_subject_temporal_p95": float(
-                    np.nanquantile(v5_subject_temporal[interior], 0.95)
+                    np.nanquantile(v5_subject_temporal[subject_temporal_selection], 0.95)
                 ),
                 "v5_excess_jump_max": float(np.nanmax(v5_excess)),
                 "v5_excess_jump_frame": v5_excess_index,
@@ -662,8 +680,10 @@ def main() -> None:
             args.result_root,
             tuple(scene_config[scene]["face_box"]),
             tuple(scene_config[scene]["static_box"]) if "static_box" in scene_config[scene] else None,
-            args.flow_root,
-            args.algorithm_version,
+            tuple(scene_config[scene]["subject_box"]) if "subject_box" in scene_config[scene] else None,
+            list(scene_config[scene]["tail_frames"]) if "tail_frames" in scene_config[scene] else None,
+            flow_root=args.flow_root,
+            algorithm_version=args.algorithm_version,
         )
         for scene in args.scenes
     ]

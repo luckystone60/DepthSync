@@ -18,14 +18,6 @@ class LocalFieldConfig:
     min_fit_pixels: int = 24
     scale_ridge: float = 1e-2
     offset_ridge: float = 1e-3
-    spatial_iterations: int = 5
-    rgb_sigma: float = 24.0
-    depth_sigma_fraction: float = 0.04
-    spatial_weight: float = 2.0
-    identity_weight: float = 1.0
-    temporal_smoothing: float = 0.65
-    max_scale_step: float = 0.03
-    max_offset_step_fraction: float = 0.02
     flow_confidence_low: float = 0.05
     flow_confidence_high: float = 0.25
     upsample_depth_sigma_fraction: float = 0.04
@@ -60,6 +52,18 @@ class LocalFieldSequence:
             raise ValueError("local field channels must have equal shapes")
         if not np.isfinite(self.photo_range) or self.photo_range <= 0:
             raise ValueError("photo_range must be finite and positive")
+        if any(
+            not np.all(np.isfinite(channel))
+            for channel in (
+                self.delta_scale,
+                self.offset_norm,
+                self.confidence,
+                self.depth_low,
+            )
+        ):
+            raise ValueError("local field channels must be finite")
+        if np.any((self.confidence < 0.0) | (self.confidence > 1.0)):
+            raise ValueError("local field confidence must be within [0,1]")
 
     def frame(self, index: int) -> LocalFieldFrame:
         return LocalFieldFrame(
@@ -80,6 +84,18 @@ def _validate_frame(field: LocalFieldFrame) -> None:
         raise ValueError("local field frame channels must have equal [Gh,Gw] shapes")
     if not np.isfinite(field.photo_range) or field.photo_range <= 0:
         raise ValueError("photo_range must be finite and positive")
+    if any(
+        not np.all(np.isfinite(channel))
+        for channel in (
+            field.delta_scale,
+            field.offset_norm,
+            field.confidence,
+            field.depth_low,
+        )
+    ):
+        raise ValueError("local field channels must be finite")
+    if np.any((field.confidence < 0.0) | (field.confidence > 1.0)):
+        raise ValueError("local field confidence must be within [0,1]")
 
 
 def _depth_guided_upsample(
@@ -150,16 +166,16 @@ def apply_local_field(
     if base.ndim != 2:
         raise ValueError("base must have shape [H,W]")
     _validate_frame(field)
-    confidence = np.nan_to_num(field.confidence, nan=0.0)
+    confidence = np.asarray(field.confidence, dtype=np.float32)
     if float(np.max(confidence, initial=0.0)) <= 0.0:
         return base.copy()
     (delta_scale, offset_norm), weight = _depth_guided_upsample(
         (
-            np.nan_to_num(field.delta_scale, nan=0.0).astype(np.float32),
-            np.nan_to_num(field.offset_norm, nan=0.0).astype(np.float32),
+            np.asarray(field.delta_scale, dtype=np.float32),
+            np.asarray(field.offset_norm, dtype=np.float32),
         ),
         np.clip(confidence, 0.0, 1.0).astype(np.float32),
-        np.nan_to_num(field.depth_low, nan=0.0).astype(np.float32),
+        np.asarray(field.depth_low, dtype=np.float32),
         base,
         config.upsample_depth_sigma_fraction * field.photo_range,
         config.eps,
@@ -313,28 +329,6 @@ def fit_anchor_field(
         depth_low=depth_low.astype(np.float32),
         photo_range=photo_range,
     )
-
-
-def clamp_field_step(
-    previous: np.ndarray,
-    candidate: np.ndarray,
-    config: LocalFieldConfig,
-) -> np.ndarray:
-    """Clamp trajectory changes for ``[..., scale_delta, offset_norm]``."""
-    previous = np.asarray(previous, dtype=np.float32)
-    candidate = np.asarray(candidate, dtype=np.float32)
-    if previous.shape != candidate.shape or previous.shape[-1] != 2:
-        raise ValueError("field steps must have equal [...,2] shapes")
-    delta = candidate - previous
-    delta[..., 0] = np.clip(
-        delta[..., 0], -config.max_scale_step, config.max_scale_step
-    )
-    delta[..., 1] = np.clip(
-        delta[..., 1],
-        -config.max_offset_step_fraction,
-        config.max_offset_step_fraction,
-    )
-    return (previous + delta).astype(np.float32)
 
 
 def _resize_flow_to_grid(

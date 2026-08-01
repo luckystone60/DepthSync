@@ -37,6 +37,18 @@ class DenseFlowSequence:
             raise ValueError("scene_cuts must have one value per adjacent pair")
         if len(self.frame_shape) != 2 or min(self.frame_shape) <= 0:
             raise ValueError("frame_shape must contain positive height and width")
+        if not np.all(np.isfinite(self.to_next)) or not np.all(
+            np.isfinite(self.to_previous)
+        ):
+            raise ValueError("dense flow values must be finite")
+        if not np.all(np.isfinite(self.confidence_next)) or not np.all(
+            np.isfinite(self.confidence_previous)
+        ):
+            raise ValueError("flow confidence must be finite")
+        if np.any((self.confidence_next < 0.0) | (self.confidence_next > 1.0)) or np.any(
+            (self.confidence_previous < 0.0) | (self.confidence_previous > 1.0)
+        ):
+            raise ValueError("flow confidence must be within [0,1]")
 
     def isolate_scene_cuts(self) -> "DenseFlowSequence":
         """Return a copy whose two direction confidences cannot cross cuts."""

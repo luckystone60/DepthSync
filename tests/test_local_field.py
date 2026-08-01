@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from depthsync.flow import DenseFlowSequence
 from depthsync.local_field import (
@@ -10,7 +11,6 @@ from depthsync.local_field import (
     apply_local_field,
     fit_anchor_field,
     load_local_fields,
-    clamp_field_step,
     propagate_local_fields,
     save_local_fields,
 )
@@ -98,6 +98,32 @@ def test_field_round_trip_preserves_fp16_payload(tmp_path) -> None:
     assert loaded.photo_range == fields.photo_range
 
 
+@pytest.mark.parametrize("channel", ["delta_scale", "offset_norm", "confidence", "depth_low"])
+def test_local_field_sequence_rejects_non_finite_channels(channel: str) -> None:
+    values = {
+        "delta_scale": np.zeros((1, 2, 3), np.float32),
+        "offset_norm": np.zeros((1, 2, 3), np.float32),
+        "confidence": np.ones((1, 2, 3), np.float32),
+        "depth_low": np.ones((1, 2, 3), np.float32),
+    }
+    values[channel][0, 0, 0] = np.nan
+
+    with pytest.raises(ValueError, match="finite"):
+        LocalFieldSequence(**values, photo_range=1.0)
+
+
+def test_local_field_sequence_rejects_out_of_range_confidence() -> None:
+    shape = (1, 2, 3)
+    with pytest.raises(ValueError, match="confidence"):
+        LocalFieldSequence(
+            delta_scale=np.zeros(shape, np.float32),
+            offset_norm=np.zeros(shape, np.float32),
+            confidence=np.full(shape, 1.01, np.float32),
+            depth_low=np.ones(shape, np.float32),
+            photo_range=1.0,
+        )
+
+
 def test_local_fit_separates_regions_that_share_the_same_base_value() -> None:
     """Replacing local fits with one global offset must make this fail."""
     h, w = 72, 128
@@ -147,7 +173,7 @@ def _zero_flow(frame_count: int, shape: tuple[int, int]) -> DenseFlowSequence:
 
 def test_revealed_background_stays_exact_identity() -> None:
     """Spatial smoothing into unsupported revealed pixels must make this fail."""
-    config = LocalFieldConfig(grid_shape=(18, 32), spatial_iterations=5)
+    config = LocalFieldConfig(grid_shape=(18, 32))
     gh, gw = config.grid_shape
     base = np.full((3, gh, gw), 0.4, np.float32)
     rgb = np.zeros((3, gh, gw, 3), np.uint8)
@@ -170,11 +196,7 @@ def test_revealed_background_stays_exact_identity() -> None:
 
 def test_high_confidence_transport_does_not_rewrite_fitted_parameters() -> None:
     """Per-frame re-regularization of an already fitted field must make this fail."""
-    config = LocalFieldConfig(
-        grid_shape=(18, 32),
-        spatial_iterations=8,
-        spatial_weight=4.0,
-    )
+    config = LocalFieldConfig(grid_shape=(18, 32))
     gh, gw = config.grid_shape
     base = np.full((3, gh, gw), 0.4, np.float32)
     rgb = np.full((3, gh, gw, 3), 128, np.uint8)
@@ -241,14 +263,3 @@ def test_uncertain_flow_uses_continuous_visibility_fallback() -> None:
     fields = propagate_local_fields(base, rgb, anchor, 0, flow, config)
 
     np.testing.assert_allclose(fields.confidence[1, 0], [0.0, 0.5, 1.0], atol=1e-6)
-
-
-def test_field_step_clamps_scale_and_normalized_offset_independently() -> None:
-    """Removing either temporal parameter clamp must make this fail."""
-    previous = np.zeros((3, 4, 2), np.float32)
-    candidate = np.ones_like(previous)
-
-    clamped = clamp_field_step(previous, candidate, LocalFieldConfig())
-
-    assert np.max(np.abs(clamped[..., 0])) <= 0.030001
-    assert np.max(np.abs(clamped[..., 1])) <= 0.020001

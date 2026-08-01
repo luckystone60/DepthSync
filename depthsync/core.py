@@ -90,12 +90,6 @@ class DepthSyncConfig:
     local_scale_bounds: tuple[float, float] = (0.5, 1.5)
     local_offset_bound_fraction: float = 0.35
     local_min_fit_pixels: int = 24
-    local_spatial_iterations: int = 5
-    local_spatial_weight: float = 2.0
-    local_identity_weight: float = 1.0
-    local_temporal_smoothing: float = 0.65
-    local_max_scale_step: float = 0.03
-    local_max_offset_step_fraction: float = 0.02
     local_flow_confidence_low: float = 0.05
     local_flow_confidence_high: float = 0.25
     eps: float = 1e-6
@@ -1054,7 +1048,7 @@ class DepthSync:
                     dense_flow,
                     photo_to_video_grid,
                 )
-            except (ValueError, np.linalg.LinAlgError):
+            except (ValueError, np.linalg.LinAlgError, cv2.error, FloatingPointError):
                 return replace(
                     v4,
                     fallback_reasons=tuple(
@@ -1454,12 +1448,6 @@ class DepthSync:
             scale_bounds=cfg.local_scale_bounds,
             offset_bound_fraction=cfg.local_offset_bound_fraction,
             min_fit_pixels=cfg.local_min_fit_pixels,
-            spatial_iterations=cfg.local_spatial_iterations,
-            spatial_weight=cfg.local_spatial_weight,
-            identity_weight=cfg.local_identity_weight,
-            temporal_smoothing=cfg.local_temporal_smoothing,
-            max_scale_step=cfg.local_max_scale_step,
-            max_offset_step_fraction=cfg.local_max_offset_step_fraction,
             flow_confidence_low=cfg.local_flow_confidence_low,
             flow_confidence_high=cfg.local_flow_confidence_high,
             eps=cfg.eps,

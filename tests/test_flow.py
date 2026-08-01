@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from depthsync.flow import (
     DenseFlowSequence,
@@ -86,3 +87,31 @@ def test_scene_cut_zeroes_confidence_in_both_directions() -> None:
     np.testing.assert_array_equal(isolated.confidence_previous[0], 1.0)
     np.testing.assert_array_equal(isolated.confidence_next[1], 0.0)
     np.testing.assert_array_equal(isolated.confidence_previous[1], 0.0)
+
+
+def test_dense_flow_rejects_non_finite_values() -> None:
+    pair_shape = (1, 3, 4)
+    forward = np.zeros(pair_shape + (2,), np.float32)
+    forward[0, 0, 0, 0] = np.nan
+    with pytest.raises(ValueError, match="finite"):
+        DenseFlowSequence(
+            to_next=forward,
+            to_previous=np.zeros_like(forward),
+            confidence_next=np.ones(pair_shape, np.float32),
+            confidence_previous=np.ones(pair_shape, np.float32),
+            scene_cuts=np.zeros(1, bool),
+            frame_shape=(3, 4),
+        )
+
+
+def test_dense_flow_rejects_out_of_range_confidence() -> None:
+    pair_shape = (1, 3, 4)
+    with pytest.raises(ValueError, match="confidence"):
+        DenseFlowSequence(
+            to_next=np.zeros(pair_shape + (2,), np.float32),
+            to_previous=np.zeros(pair_shape + (2,), np.float32),
+            confidence_next=np.full(pair_shape, -0.01, np.float32),
+            confidence_previous=np.ones(pair_shape, np.float32),
+            scene_cuts=np.zeros(1, bool),
+            frame_shape=(3, 4),
+        )

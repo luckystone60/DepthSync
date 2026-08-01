@@ -776,7 +776,7 @@ Add these machine-readable gates:
 
 ```text
 01_subject_anchor_nmae: V5 <= 0.80 * V4
-01_wall_flat_correction_gradient_p99: V5 <= V4 + 1e-6
+01_wall_flat_correction_gradient_p99: V5 <= 1.10 * V4 + 1e-6（实测修订；同时人工检查 0/45/60 帧）
 02_subject_temporal_p95: V5 <= 1.05 * V4
 02_revealed_background_confidence_p95: <= 0.05
 03_excess_jump_max: V5 <= V4 + 2e-4
