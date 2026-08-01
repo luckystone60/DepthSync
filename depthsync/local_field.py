@@ -82,6 +82,64 @@ def _validate_frame(field: LocalFieldFrame) -> None:
         raise ValueError("photo_range must be finite and positive")
 
 
+def _depth_guided_upsample(
+    values: tuple[np.ndarray, ...],
+    confidence: np.ndarray,
+    depth_low: np.ndarray,
+    base: np.ndarray,
+    depth_sigma: float,
+    eps: float,
+) -> tuple[tuple[np.ndarray, ...], np.ndarray]:
+    """Jointly upsample a coarse field without mixing across depth edges."""
+    height, width = base.shape
+    gh, gw = confidence.shape
+    grid_x = (np.arange(width, dtype=np.float32) + 0.5) * gw / width - 0.5
+    grid_y = (np.arange(height, dtype=np.float32) + 0.5) * gh / height - 0.5
+    x0_raw = np.floor(grid_x).astype(np.int32)
+    y0_raw = np.floor(grid_y).astype(np.int32)
+    tx = grid_x - x0_raw
+    ty = grid_y - y0_raw
+    x_indices = (np.clip(x0_raw, 0, gw - 1), np.clip(x0_raw + 1, 0, gw - 1))
+    y_indices = (np.clip(y0_raw, 0, gh - 1), np.clip(y0_raw + 1, 0, gh - 1))
+    x_weights = (1.0 - tx, tx)
+    y_weights = (1.0 - ty, ty)
+
+    guide_denominator = np.zeros((height, width), np.float32)
+    supported_denominator = np.zeros((height, width), np.float32)
+    numerators = [np.zeros((height, width), np.float32) for _ in values]
+    safe_base = np.nan_to_num(base, nan=0.0).astype(np.float32)
+    sigma = max(float(depth_sigma), eps)
+    for yi, wy in zip(y_indices, y_weights):
+        for xi, wx in zip(x_indices, x_weights):
+            spatial = wy[:, None] * wx[None, :]
+            node_depth = depth_low[yi[:, None], xi[None, :]]
+            depth_weight = np.exp(
+                np.clip(-np.abs(safe_base - node_depth) / sigma, -50.0, 0.0)
+            )
+            guide_weight = spatial * depth_weight
+            node_confidence = confidence[yi[:, None], xi[None, :]]
+            supported_weight = guide_weight * node_confidence
+            guide_denominator += guide_weight
+            supported_denominator += supported_weight
+            for numerator, value in zip(numerators, values):
+                numerator += supported_weight * value[yi[:, None], xi[None, :]]
+
+    upsampled_values = tuple(
+        np.where(
+            supported_denominator > eps,
+            numerator / np.maximum(supported_denominator, eps),
+            0.0,
+        ).astype(np.float32)
+        for numerator in numerators
+    )
+    upsampled_confidence = np.where(
+        guide_denominator > eps,
+        supported_denominator / np.maximum(guide_denominator, eps),
+        0.0,
+    )
+    return upsampled_values, np.clip(upsampled_confidence, 0.0, 1.0).astype(np.float32)
+
+
 def apply_local_field(
     base: np.ndarray,
     field: LocalFieldFrame,
@@ -95,26 +153,16 @@ def apply_local_field(
     confidence = np.nan_to_num(field.confidence, nan=0.0)
     if float(np.max(confidence, initial=0.0)) <= 0.0:
         return base.copy()
-    height, width = base.shape
-    size = (width, height)
-    delta_scale = cv2.resize(
-        np.nan_to_num(field.delta_scale, nan=0.0).astype(np.float32),
-        size,
-        interpolation=cv2.INTER_LINEAR,
-    )
-    offset_norm = cv2.resize(
-        np.nan_to_num(field.offset_norm, nan=0.0).astype(np.float32),
-        size,
-        interpolation=cv2.INTER_LINEAR,
-    )
-    weight = np.clip(
-        cv2.resize(
-            np.clip(confidence, 0.0, 1.0).astype(np.float32),
-            size,
-            interpolation=cv2.INTER_LINEAR,
+    (delta_scale, offset_norm), weight = _depth_guided_upsample(
+        (
+            np.nan_to_num(field.delta_scale, nan=0.0).astype(np.float32),
+            np.nan_to_num(field.offset_norm, nan=0.0).astype(np.float32),
         ),
-        0.0,
-        1.0,
+        np.clip(confidence, 0.0, 1.0).astype(np.float32),
+        np.nan_to_num(field.depth_low, nan=0.0).astype(np.float32),
+        base,
+        config.upsample_depth_sigma_fraction * field.photo_range,
+        config.eps,
     )
     scale = np.clip(
         1.0 + delta_scale,

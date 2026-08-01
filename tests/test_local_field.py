@@ -37,6 +37,32 @@ def test_zero_confidence_is_bit_exact_identity() -> None:
     np.testing.assert_array_equal(actual, base)
 
 
+def test_depth_guided_upsampling_does_not_blend_across_depth_edge() -> None:
+    """Plain bilinear field upsampling must make this edge test fail."""
+    base = np.full((8, 8), 0.2, np.float32)
+    base[:, 4:] = 0.8
+    field = LocalFieldFrame(
+        delta_scale=np.zeros((1, 2), np.float32),
+        offset_norm=np.asarray([[0.2, -0.2]], np.float32),
+        confidence=np.ones((1, 2), np.float32),
+        depth_low=np.asarray([[0.2, 0.8]], np.float32),
+        photo_range=1.0,
+    )
+
+    output = apply_local_field(
+        base,
+        field,
+        LocalFieldConfig(
+            grid_shape=(1, 2),
+            upsample_depth_sigma_fraction=0.01,
+        ),
+    )
+    correction = output - base
+
+    assert np.min(correction[:, 3]) > 0.18
+    assert np.max(correction[:, 4]) < -0.18
+
+
 def test_field_round_trip_preserves_fp16_payload(tmp_path) -> None:
     """Changing persisted channel dtype or values must make this fail."""
     shape = (3, 3, 4)
