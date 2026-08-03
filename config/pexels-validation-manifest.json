@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "tag_targets": {
+    "walking_turning": 4,
+    "dance_motion": 4,
+    "sport_running": 4,
+    "portrait_close": 4,
+    "camera_occlusion": 4
+  },
+  "scenes": [
+    {
+      "scene_id": "01",
+      "source_type": "local_existing",
+      "tags": ["walking_turning"]
+    },
+    {
+      "scene_id": "02",
+      "source_type": "local_existing",
+      "tags": ["sport_running"]
+    },
+    {
+      "scene_id": "03",
+      "source_type": "local_existing",
+      "tags": ["dance_motion"]
+    }
+  ]
+}
