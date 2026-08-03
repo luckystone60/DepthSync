@@ -14,6 +14,12 @@ C:\Users\jiao\Documents\DepthSync\.venv-models\Scripts\python.exe tools\run_dept
 
 DAv2 输出保存在 Git 忽略的 `artifacts/depth/<scene>/`，包含原始相对深度、方向统一后的 disparity 和完整推理元数据。
 
+20 段场景完成后，使用以下命令汇总；缺失、无效锚点或回退场景会单独列出，不会被平均指标掩盖：
+
+```powershell
+python -m depthsync.aggregate_validation --result-root results\dav2 --manifest config\pexels-validation-manifest.json --report reports\validation-dav2-20-scenes.json
+```
+
 当前效果优先版本为 V5：以 V4 全局单调 LUT 作为稳定基线，在照片锚帧拟合 `36×64` 局部 affine 场，并通过 SEA-RAFT-S 双向光流在拍后准备阶段向整段视频传播。播放阶段不运行模型，低置信度区域严格回退 V4。
 
 - 端侧算法、数据规格、内存/算力和回退策略：[`docs/depthsync-v5-algorithm.md`](docs/depthsync-v5-algorithm.md)
