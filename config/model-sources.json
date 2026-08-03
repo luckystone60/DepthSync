@@ -6,6 +6,14 @@
     "local_checkpoint": "models/depth_pro.pt",
     "sha256": "3EB35CA68168AD3D14CB150F8947A4EDF85589941661FDB2686259C80685C0CE"
   },
+  "depth_anything_v2_large": {
+    "repository": "https://github.com/DepthAnything/Depth-Anything-V2",
+    "huggingface_model_id": "depth-anything/Depth-Anything-V2-Large-hf",
+    "revision": "7581137eff8d4e94f6e796d3baea0e9fa79b22d2",
+    "local_cache": "models/huggingface/depth-anything-v2-large",
+    "license": "CC-BY-NC-4.0",
+    "validation_only": true
+  },
   "video_depth_anything_small": {
     "repository": "https://github.com/DepthAnything/Video-Depth-Anything",
     "revision": "4f5ae23172ba60fd7bc11ef671cca678842c7072",

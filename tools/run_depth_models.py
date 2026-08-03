@@ -14,7 +14,8 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-import torch
+
+from depthsync.dav2 import orient_relative_depth, write_dav2_outputs
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,6 +43,8 @@ def _write_metadata(path: Path, metadata: InferenceMetadata) -> None:
 
 
 def run_depthpro(anchor_path: Path, output_dir: Path, checkpoint: Path) -> None:
+    import torch
+
     sys.path.insert(0, str(ROOT / "third_party" / "ml-depth-pro" / "src"))
     import depth_pro
     from depth_pro.depth_pro import DEFAULT_MONODEPTH_CONFIG_DICT
@@ -70,6 +73,8 @@ def run_depthpro(anchor_path: Path, output_dir: Path, checkpoint: Path) -> None:
 
 
 def run_vda_streaming(clip_path: Path, output_dir: Path, checkpoint: Path, short_side: int, input_size: int) -> None:
+    import torch
+
     repo = ROOT / "third_party" / "Video-Depth-Anything"
     sys.path.insert(0, str(repo))
     from video_depth_anything.video_depth_stream import VideoDepthAnything
@@ -109,6 +114,85 @@ def run_vda_streaming(clip_path: Path, output_dir: Path, checkpoint: Path, short
     )
 
 
+def _load_reference_disparity(path: Path, anchor_index: int) -> np.ndarray:
+    if path.suffix == ".npy":
+        value = np.load(path)
+    else:
+        with np.load(path) as payload:
+            if "disparity" not in payload:
+                raise ValueError(f"Reference archive has no disparity key: {path}")
+            value = payload["disparity"]
+    value = np.asarray(value, dtype=np.float32)
+    if value.ndim == 3:
+        if not 0 <= anchor_index < len(value):
+            raise ValueError(f"anchor_index out of range for reference: {anchor_index}")
+        value = value[anchor_index]
+    if value.ndim != 2 or not np.all(np.isfinite(value)):
+        raise ValueError("reference disparity must be finite [H,W]")
+    return value
+
+
+def run_dav2_large(
+    anchor_path: Path,
+    output_dir: Path,
+    reference_vda: Path,
+    model_id: str,
+    revision: str,
+    requested_device: str | None,
+    anchor_index: int,
+) -> None:
+    """Infer one offline DAv2-Large anchor and orient it to VDA disparity."""
+    import torch
+    from transformers import AutoImageProcessor, AutoModelForDepthEstimation
+
+    if requested_device is None or requested_device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    else:
+        device = requested_device
+    if device == "cuda" and not torch.cuda.is_available():
+        raise ValueError("CUDA was requested but is unavailable")
+    bgr = cv2.imread(str(anchor_path), cv2.IMREAD_COLOR)
+    if bgr is None:
+        raise ValueError(f"Cannot read anchor image: {anchor_path}")
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    reference = _load_reference_disparity(reference_vda, anchor_index)
+    start = time.perf_counter()
+    processor = AutoImageProcessor.from_pretrained(model_id, revision=revision)
+    model = AutoModelForDepthEstimation.from_pretrained(model_id, revision=revision)
+    model = model.to(device).eval()
+    inputs = processor(images=rgb, return_tensors="pt")
+    inputs = {name: value.to(device) for name, value in inputs.items()}
+    with torch.inference_mode():
+        predicted = model(**inputs).predicted_depth
+    relative = torch.nn.functional.interpolate(
+        predicted.unsqueeze(1),
+        size=rgb.shape[:2],
+        mode="bicubic",
+        align_corners=False,
+    )[0, 0].float().cpu().numpy()
+    disparity, direction_reversed = orient_relative_depth(relative, reference)
+    elapsed = time.perf_counter() - start
+    write_dav2_outputs(
+        output_dir,
+        relative,
+        disparity,
+        {
+            "backend": "Depth-Anything-V2-Large",
+            "model_id": model_id,
+            "revision": revision,
+            "device": device,
+            "precision": "fp32",
+            "frame_count": 1,
+            "output_height": int(disparity.shape[0]),
+            "output_width": int(disparity.shape[1]),
+            "elapsed_seconds": elapsed,
+            "direction_reversed": direction_reversed,
+            "reference_vda": str(reference_vda),
+            "anchor_index": anchor_index,
+        },
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="backend", required=True)
@@ -122,11 +206,32 @@ def main() -> None:
     vda.add_argument("--checkpoint", type=Path, default=ROOT / "models" / "video_depth_anything_vits.pth")
     vda.add_argument("--short-side", type=int, default=256)
     vda.add_argument("--input-size", type=int, default=518)
+    dav2 = subparsers.add_parser("dav2-large")
+    dav2.add_argument("--anchor", required=True, type=Path)
+    dav2.add_argument("--output-dir", required=True, type=Path)
+    dav2.add_argument("--reference-vda", required=True, type=Path)
+    dav2.add_argument("--anchor-index", type=int, default=45)
+    dav2.add_argument(
+        "--model-id",
+        default="depth-anything/Depth-Anything-V2-Large-hf",
+    )
+    dav2.add_argument("--revision", default="main")
+    dav2.add_argument("--device", default="auto")
     args = parser.parse_args()
     if args.backend == "depthpro":
         run_depthpro(args.anchor, args.output_dir, args.checkpoint)
-    else:
+    elif args.backend == "vda":
         run_vda_streaming(args.clip, args.output_dir, args.checkpoint, args.short_side, args.input_size)
+    else:
+        run_dav2_large(
+            args.anchor,
+            args.output_dir,
+            args.reference_vda,
+            args.model_id,
+            args.revision,
+            args.device,
+            args.anchor_index,
+        )
 
 
 if __name__ == "__main__":

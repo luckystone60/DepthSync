@@ -1,5 +1,19 @@
 # DepthSync
 
+## DAv2-Large 离线锚点验证
+
+V5 的 20 场景扩展验证默认使用 `Depth-Anything-V2-Large` 生成照片锚点；该模型只用于离线仿真，不会进入端侧、播放或拍后准备路径。模型卡使用 `CC-BY-NC-4.0`，因此当前用途限于非商业验证。DepthPro 仍保留为基线。
+
+```powershell
+C:\Users\jiao\Documents\DepthSync\.venv-models\Scripts\python.exe tools\run_depth_models.py dav2-large `
+  --anchor artifacts\clips\01\anchor.png `
+  --reference-vda artifacts\depth\01\video_disparity.npz `
+  --output-dir artifacts\depth\01 `
+  --revision 7581137eff8d4e94f6e796d3baea0e9fa79b22d2
+```
+
+DAv2 输出保存在 Git 忽略的 `artifacts/depth/<scene>/`，包含原始相对深度、方向统一后的 disparity 和完整推理元数据。
+
 当前效果优先版本为 V5：以 V4 全局单调 LUT 作为稳定基线，在照片锚帧拟合 `36×64` 局部 affine 场，并通过 SEA-RAFT-S 双向光流在拍后准备阶段向整段视频传播。播放阶段不运行模型，低置信度区域严格回退 V4。
 
 - 端侧算法、数据规格、内存/算力和回退策略：[`docs/depthsync-v5-algorithm.md`](docs/depthsync-v5-algorithm.md)
