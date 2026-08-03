@@ -146,6 +146,17 @@ def test_local_field_sequence_rejects_out_of_contract_parameters(
         LocalFieldSequence(**values, photo_range=1.0)
 
 
+def test_local_field_sequence_accepts_fp16_rounding_at_offset_boundary() -> None:
+    shape = (1, 2, 3)
+    LocalFieldSequence(
+        delta_scale=np.zeros(shape, np.float32),
+        offset_norm=np.full(shape, np.float16(0.35), np.float32),
+        confidence=np.ones(shape, np.float32),
+        depth_low=np.ones(shape, np.float32),
+        photo_range=1.0,
+    )
+
+
 def test_local_fit_separates_regions_that_share_the_same_base_value() -> None:
     """Replacing local fits with one global offset must make this fail."""
     h, w = 72, 128
@@ -244,6 +255,30 @@ def test_high_confidence_transport_does_not_rewrite_fitted_parameters() -> None:
     )
 
     np.testing.assert_allclose(fields.offset_norm[0], offset, atol=1e-6)
+
+
+def test_upsampling_edge_guard_uses_depth_guide_range_not_photo_range() -> None:
+    """A wide-range anchor must not blend a local correction across a V4 edge."""
+    config = LocalFieldConfig(grid_shape=(1, 2), upsample_depth_sigma_fraction=0.04)
+    base = np.concatenate(
+        [np.full((8, 64), 0.1, np.float32), np.full((8, 64), 0.9, np.float32)],
+        axis=1,
+    )
+    depth_low = np.asarray([[0.1, 0.9]], np.float32)
+    field = LocalFieldFrame(
+        np.zeros((1, 2), np.float32),
+        np.asarray([[0.1, 0.0]], np.float32),
+        np.ones((1, 2), np.float32),
+        depth_low,
+        100.0,
+    )
+
+    synced = apply_local_field(base, field, config)
+
+    # The 10-unit correction must stay on the left side despite DAv2's large
+    # anchor range; old behavior leaked it through the entire image.
+    assert float(np.median(synced[:, :48] - base[:, :48])) > 5.0
+    assert float(np.max(np.abs(synced[:, 80:] - base[:, 80:]))) < 1e-3
 
 
 def test_reliable_flow_does_not_cumulatively_attenuate_field_confidence() -> None:

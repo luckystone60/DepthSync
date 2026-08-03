@@ -11,7 +11,9 @@ from .flow import DenseFlowSequence
 
 
 FIELD_DELTA_SCALE_BOUNDS = (-0.5, 0.5)
-FIELD_OFFSET_NORM_BOUNDS = (-0.35, 0.35)
+# FP16 represents 0.35 as 0.35009766.  The narrow margin is part of the
+# serialized contract; playback still clamps to LocalFieldConfig's ±0.35.
+FIELD_OFFSET_NORM_BOUNDS = (-0.351, 0.351)
 
 
 @dataclass(frozen=True)
@@ -201,7 +203,12 @@ def apply_local_field(
         np.clip(confidence, 0.0, 1.0).astype(np.float32),
         np.asarray(field.depth_low, dtype=np.float32),
         base,
-        config.upsample_depth_sigma_fraction * field.photo_range,
+        # ``base`` and ``depth_low`` are in the V4 working-depth domain.  The
+        # photo anchor may have a very different raw range (notably DAv2), so
+        # using ``photo_range`` here silently turns the edge guard into a
+        # near-uniform bilinear blend.  This threshold must stay in the guide
+        # domain.
+        config.upsample_depth_sigma_fraction * _guide_range(base, config.eps),
         config.eps,
     )
     scale = np.clip(
@@ -224,6 +231,16 @@ def _photo_range(photo: np.ndarray, eps: float) -> float:
         return 1.0
     value = float(np.quantile(finite, 0.9) - np.quantile(finite, 0.1))
     return max(value, eps)
+
+
+def _guide_range(depth: np.ndarray, eps: float) -> float:
+    """Robust guide-domain range with a FP16-safe floor for flat regions."""
+    finite = np.asarray(depth, dtype=np.float32)
+    finite = finite[np.isfinite(finite)]
+    if finite.size == 0:
+        return eps
+    magnitude = float(np.quantile(np.abs(finite), 0.9))
+    return max(_photo_range(finite, eps), 0.01 * magnitude, eps)
 
 
 def _odd_window(value: float) -> int:
