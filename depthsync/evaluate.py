@@ -11,6 +11,7 @@ import cv2
 import numpy as np
 
 from .core import DepthSync, DepthSyncConfig, MotionSequence, SyncResult
+from .anchors import load_anchor_disparity
 from .flow import DenseFlowSequence, load_flow
 from .motion import estimate_block_motion, load_motion, save_motion
 
@@ -257,13 +258,14 @@ def evaluate_scene(
     tail_frames: list[int] | None = None,
     flow_root: Path | None = None,
     algorithm_version: str = "v4",
+    anchor_model: str = "dav2-large",
 ) -> dict[str, float | int | str]:
     clip_dir = clip_root / scene
     depth_dir = depth_root / scene
     result_dir = result_root / scene
     result_dir.mkdir(parents=True, exist_ok=True)
     video_depth = np.load(depth_dir / "video_disparity.npz")["disparity"].astype(np.float32)
-    photo = np.load(depth_dir / "photo_disparity.npy").astype(np.float32)
+    photo = load_anchor_disparity(depth_dir, anchor_model)
     anchor = int(json.loads((clip_dir / "manifest.json").read_text(encoding="utf-8"))["anchor_index"])
     photo_low = cv2.resize(photo, (video_depth.shape[2], video_depth.shape[1]), interpolation=cv2.INTER_AREA)
     motion_path = result_dir / "motion.npz"
@@ -345,6 +347,7 @@ def evaluate_scene(
 
     metrics: dict[str, float | int | str] = {
         "scene": scene,
+        "anchor_model": anchor_model,
         "frame_count": int(len(video_depth)),
         "anchor_index": anchor,
         "raw_anchor_nmae": _anchor_nmae(video_depth[anchor], photo_low),
@@ -667,6 +670,7 @@ def main() -> None:
     parser.add_argument("--flow-root", type=Path, default=Path("artifacts/flow"))
     parser.add_argument("--result-root", type=Path, default=Path("results"))
     parser.add_argument("--algorithm-version", choices=("v4", "v5"), default="v4")
+    parser.add_argument("--anchor-model", choices=("dav2-large", "depthpro"), default="dav2-large")
     parser.add_argument("--scenes", nargs="+", default=["01", "02", "03"])
     parser.add_argument("--scene-config", type=Path, default=Path("config/validation-scenes.json"))
     parser.add_argument("--report", type=Path, default=Path("reports/validation.md"))
@@ -684,6 +688,7 @@ def main() -> None:
             list(scene_config[scene]["tail_frames"]) if "tail_frames" in scene_config[scene] else None,
             flow_root=args.flow_root,
             algorithm_version=args.algorithm_version,
+            anchor_model=args.anchor_model,
         )
         for scene in args.scenes
     ]

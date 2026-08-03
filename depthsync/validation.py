@@ -6,9 +6,11 @@ import hashlib
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 import cv2
+
+from .pexels_dataset import validate_manifest
 
 
 @dataclass(frozen=True)
@@ -121,12 +123,93 @@ def prepare_all(sources: Iterable[Path], output_root: Path) -> list[ClipManifest
     return [prepare_validation_clip(source, output_root / source.stem) for source in sources]
 
 
+def scene_ids_from_manifest(path: Path | str, expected_count: int = 20) -> list[str]:
+    """Read a validation manifest and require contiguous two-digit scene IDs."""
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    validate_manifest(payload)
+    actual = sorted(row["scene_id"] for row in payload["scenes"])
+    expected = [f"{index:02d}" for index in range(1, expected_count + 1)]
+    missing = [scene for scene in expected if scene not in actual]
+    unexpected = [scene for scene in actual if scene not in expected]
+    if missing or unexpected or len(actual) != expected_count:
+        details = []
+        if missing:
+            details.append(f"missing {', '.join(missing)}")
+        if unexpected:
+            details.append(f"unexpected {', '.join(unexpected)}")
+        raise ValueError("manifest scene IDs must be contiguous: " + "; ".join(details))
+    return expected
+
+
+def _validate_box(name: str, value: Any, scene: str) -> None:
+    if not isinstance(value, list) or len(value) != 4:
+        raise ValueError(f"{name} missing for scene {scene}")
+    try:
+        x0, y0, x1, y1 = (float(item) for item in value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{name} invalid for scene {scene}") from error
+    if not (0.0 <= x0 < x1 <= 1.0 and 0.0 <= y0 < y1 <= 1.0):
+        raise ValueError(f"{name} invalid for scene {scene}")
+
+
+def validate_scene_coverage(config: dict[str, Any], scene_ids: Iterable[str]) -> None:
+    """Require manually supplied, usable ROIs and inspection frames per scene."""
+    for scene in scene_ids:
+        row = config.get(scene)
+        if not isinstance(row, dict):
+            raise ValueError(f"validation config missing scene {scene}")
+        _validate_box("face_box", row.get("face_box"), scene)
+        _validate_box("subject_box", row.get("subject_box"), scene)
+        inspection = row.get("inspection_frames")
+        if not isinstance(inspection, list) or not {0, 45}.issubset(inspection):
+            raise ValueError(f"inspection_frames missing for scene {scene}")
+        tail = row.get("tail_frames")
+        if not isinstance(tail, list) or tail != list(range(75, 90)):
+            raise ValueError(f"tail_frames missing for scene {scene}")
+
+
+def prepare_from_manifest(
+    manifest_path: Path,
+    source_root: Path,
+    output_root: Path,
+    scene_config: Path | None = None,
+    expected_count: int = 20,
+) -> list[ClipManifest]:
+    scenes = scene_ids_from_manifest(manifest_path, expected_count)
+    if scene_config is not None:
+        validate_scene_coverage(
+            json.loads(scene_config.read_text(encoding="utf-8")), scenes
+        )
+    sources = [source_root / f"{scene}.mp4" for scene in scenes]
+    missing = [str(source) for source in sources if not source.is_file()]
+    if missing:
+        raise FileNotFoundError("missing source videos: " + ", ".join(missing))
+    return prepare_all(sources, output_root)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Prepare deterministic 3 s / 90 frame DepthSync validation clips")
-    parser.add_argument("sources", nargs="+", type=Path)
+    parser.add_argument("sources", nargs="*", type=Path)
     parser.add_argument("--output-root", type=Path, default=Path("artifacts/clips"))
+    parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--source-root", type=Path, default=Path("testdata"))
+    parser.add_argument("--scene-config", type=Path, default=Path("config/validation-scenes.json"))
+    parser.add_argument("--expected-count", type=int, default=20)
     args = parser.parse_args()
-    manifests = prepare_all(args.sources, args.output_root)
+    if args.manifest is not None:
+        if args.sources:
+            parser.error("sources cannot be combined with --manifest")
+        manifests = prepare_from_manifest(
+            args.manifest,
+            args.source_root,
+            args.output_root,
+            args.scene_config,
+            args.expected_count,
+        )
+    elif args.sources:
+        manifests = prepare_all(args.sources, args.output_root)
+    else:
+        parser.error("provide sources or --manifest")
     for manifest in manifests:
         print(f"{Path(manifest.source).name}: {manifest.target_frame_count} frames, anchor={manifest.anchor_index}")
 
