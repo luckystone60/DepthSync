@@ -65,6 +65,24 @@ def test_scene_01_wall_gate_allows_small_smooth_correction_cost() -> None:
     assert gates["01_wall_flat_correction_gradient_p99"]["passed"] is True
 
 
+def test_new_scenes_use_generic_anchor_and_temporal_gates() -> None:
+    metrics = {
+        "v4_anchor_nmae": 0.10,
+        "v5_anchor_nmae": 0.08,
+        "v4_subject_anchor_nmae": 0.12,
+        "v5_subject_anchor_nmae": 0.09,
+        "v4_temporal_p95": 0.01,
+        "v5_temporal_p95": 0.0114,
+        "v5_parameter_bytes": 1_244_160,
+    }
+
+    gates = classify_v5_gates("20", metrics)
+
+    assert gates["generic_anchor_nmae"]["passed"] is True
+    assert gates["generic_subject_anchor_nmae"]["passed"] is True
+    assert gates["generic_temporal_p95"]["passed"] is False
+
+
 def test_tail_frame_config_maps_to_temporal_error_indices() -> None:
     indices = temporal_frame_indices([0, 1, 75, 89, 100], frame_count=90)
 

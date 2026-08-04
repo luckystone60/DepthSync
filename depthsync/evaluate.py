@@ -89,6 +89,19 @@ def classify_v5_gates(
             metrics["v5_excess_jump_max"],
             metrics["v4_excess_jump_max"] + 2e-4,
         )
+    elif scene.isdigit() and 4 <= int(scene) <= 20:
+        gates["generic_anchor_nmae"] = _gate(
+            metrics["v5_anchor_nmae"],
+            metrics["v4_anchor_nmae"],
+        )
+        gates["generic_subject_anchor_nmae"] = _gate(
+            metrics["v5_subject_anchor_nmae"],
+            metrics["v4_subject_anchor_nmae"],
+        )
+        gates["generic_temporal_p95"] = _gate(
+            metrics["v5_temporal_p95"],
+            1.10 * metrics["v4_temporal_p95"] + 2e-4,
+        )
     else:
         raise ValueError(f"unknown validation scene: {scene}")
     return gates
