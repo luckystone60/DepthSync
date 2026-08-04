@@ -90,9 +90,22 @@ def accept_candidate(
     replace: bool,
 ) -> dict[str, Any]:
     manifest = _load_manifest(manifest_path)
-    if scene_id in {row["scene_id"] for row in manifest["scenes"]}:
+    existing_index = next(
+        (
+            index
+            for index, row in enumerate(manifest["scenes"])
+            if row["scene_id"] == scene_id
+        ),
+        None,
+    )
+    if existing_index is not None and not replace:
         raise ValueError(f"scene already exists in manifest: {scene_id}")
-    if pexels_id in {row.get("pexels_id") for row in manifest["scenes"]}:
+    existing_ids = {
+        row.get("pexels_id")
+        for index, row in enumerate(manifest["scenes"])
+        if index != existing_index
+    }
+    if pexels_id in existing_ids:
         raise ValueError(f"Pexels ID already exists in manifest: {pexels_id}")
     video = _api_get(f"videos/{pexels_id}", {})
     selected = select_720p_mp4(video)
@@ -132,7 +145,10 @@ def accept_candidate(
         "sha256": sha256_file(destination),
         "license_url": "https://www.pexels.com/license/",
     }
-    manifest["scenes"].append(row)
+    if existing_index is None:
+        manifest["scenes"].append(row)
+    else:
+        manifest["scenes"][existing_index] = row
     validate_manifest(manifest)
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return row

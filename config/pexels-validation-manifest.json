@@ -11,17 +11,346 @@
     {
       "scene_id": "01",
       "source_type": "local_existing",
-      "tags": ["walking_turning"]
+      "tags": [
+        "walking_turning"
+      ]
     },
     {
       "scene_id": "02",
       "source_type": "local_existing",
-      "tags": ["sport_running"]
+      "tags": [
+        "sport_running"
+      ]
     },
     {
       "scene_id": "03",
       "source_type": "local_existing",
-      "tags": ["dance_motion"]
+      "tags": [
+        "dance_motion"
+      ]
+    },
+    {
+      "scene_id": "04",
+      "source_type": "pexels",
+      "pexels_id": 8217043,
+      "page_url": "https://www.pexels.com/video/a-woman-walking-outside-of-a-building-8217043/",
+      "photographer": "RDNE Stock project",
+      "query": "full body person walking city",
+      "tags": [
+        "walking_turning"
+      ],
+      "selected_file": {
+        "file_type": "video/mp4",
+        "width": 1280,
+        "height": 720
+      },
+      "duration_seconds": 7.0,
+      "sha256": "71f6985e17cfd4f5fde85eb2d0489e668c1fd749266b60d5e43602fb5e829c9f",
+      "license_url": "https://www.pexels.com/license/"
+    },
+    {
+      "scene_id": "05",
+      "source_type": "pexels",
+      "pexels_id": 5995594,
+      "page_url": "https://www.pexels.com/video/woman-walking-on-pavement-5995594/",
+      "photographer": "Ono  Kosuki",
+      "query": "full body person walking city",
+      "tags": [
+        "walking_turning"
+      ],
+      "selected_file": {
+        "file_type": "video/mp4",
+        "width": 720,
+        "height": 1280
+      },
+      "duration_seconds": 15.0,
+      "sha256": "7ffd403b6368c3d514321466ffb311fe4cad01ef2bd253884e72802c38dfaa55",
+      "license_url": "https://www.pexels.com/license/"
+    },
+    {
+      "scene_id": "06",
+      "source_type": "pexels",
+      "pexels_id": 6272896,
+      "page_url": "https://www.pexels.com/video/woman-crossing-the-street-6272896/",
+      "photographer": "Uriel Mont",
+      "query": "full body person walking city",
+      "tags": [
+        "walking_turning"
+      ],
+      "selected_file": {
+        "file_type": "video/mp4",
+        "width": 720,
+        "height": 1280
+      },
+      "duration_seconds": 10.0,
+      "sha256": "7fb7cff1ed11f30364bfb305240aa8d89d66863d0ba0e7453d4a9a1091c90af9",
+      "license_url": "https://www.pexels.com/license/"
+    },
+    {
+      "scene_id": "07",
+      "source_type": "pexels",
+      "pexels_id": 6616341,
+      "page_url": "https://www.pexels.com/video/woman-dancing-ballet-6616341/",
+      "photographer": "Yan Krukau",
+      "query": "full body dancer moving",
+      "tags": [
+        "dance_motion"
+      ],
+      "selected_file": {
+        "file_type": "video/mp4",
+        "width": 1280,
+        "height": 720
+      },
+      "duration_seconds": 14.0,
+      "sha256": "e9e5479461a4029e678980b260f3199fd42618956c3c3f793aad97ef957b5d1a",
+      "license_url": "https://www.pexels.com/license/"
+    },
+    {
+      "scene_id": "08",
+      "source_type": "pexels",
+      "pexels_id": 6221593,
+      "page_url": "https://www.pexels.com/video/a-man-dancing-6221593/",
+      "photographer": "cottonbro studio",
+      "query": "full body dancer moving",
+      "tags": [
+        "dance_motion"
+      ],
+      "selected_file": {
+        "file_type": "video/mp4",
+        "width": 1366,
+        "height": 720
+      },
+      "duration_seconds": 18.0,
+      "sha256": "5332bf2d5be54c8719c5acfe96ebd0aea5ad107957c6694031b5036a7f0f3808",
+      "license_url": "https://www.pexels.com/license/"
+    },
+    {
+      "scene_id": "09",
+      "source_type": "pexels",
+      "pexels_id": 6616348,
+      "page_url": "https://www.pexels.com/video/woman-dancing-ballet-6616348/",
+      "photographer": "Yan Krukau",
+      "query": "full body dancer moving",
+      "tags": [
+        "dance_motion"
+      ],
+      "selected_file": {
+        "file_type": "video/mp4",
+        "width": 720,
+        "height": 1280
+      },
+      "duration_seconds": 17.0,
+      "sha256": "7df033e093e5d54a0d34fff2e2b5b99c460e5973067ee7178bdb8b979dda8849",
+      "license_url": "https://www.pexels.com/license/"
+    },
+    {
+      "scene_id": "10",
+      "source_type": "pexels",
+      "pexels_id": 5310933,
+      "page_url": "https://www.pexels.com/video/woman-running-on-the-street-5310933/",
+      "photographer": "cottonbro studio",
+      "query": "person running action",
+      "tags": [
+        "sport_running"
+      ],
+      "selected_file": {
+        "file_type": "video/mp4",
+        "width": 1280,
+        "height": 720
+      },
+      "duration_seconds": 5.0,
+      "sha256": "aeec3135e286e501480d246b5a754cbdf425934caa5ce97e12d09fb3c80837a8",
+      "license_url": "https://www.pexels.com/license/"
+    },
+    {
+      "scene_id": "11",
+      "source_type": "pexels",
+      "pexels_id": 8344810,
+      "page_url": "https://www.pexels.com/video/people-working-out-together-8344810/",
+      "photographer": "Kampus Production",
+      "query": "person running action",
+      "tags": [
+        "sport_running"
+      ],
+      "selected_file": {
+        "file_type": "video/mp4",
+        "width": 1280,
+        "height": 720
+      },
+      "duration_seconds": 26.0,
+      "sha256": "274bde153c7130c795169c26078c8abae64daeb2fa8780bab509d2e6dd5877d6",
+      "license_url": "https://www.pexels.com/license/"
+    },
+    {
+      "scene_id": "12",
+      "source_type": "pexels",
+      "pexels_id": 8533791,
+      "page_url": "https://www.pexels.com/video/a-man-in-a-tank-top-jogging-8533791/",
+      "photographer": "KoolShooters",
+      "query": "person running action",
+      "tags": [
+        "sport_running"
+      ],
+      "selected_file": {
+        "file_type": "video/mp4",
+        "width": 1280,
+        "height": 720
+      },
+      "duration_seconds": 15.0,
+      "sha256": "e444426128e73302f08f8a89b41eccbdb1616be4f04d32fb82baca574384f238",
+      "license_url": "https://www.pexels.com/license/"
+    },
+    {
+      "scene_id": "13",
+      "source_type": "pexels",
+      "pexels_id": 8524496,
+      "page_url": "https://www.pexels.com/video/a-woman-showing-her-jewelries-8524496/",
+      "photographer": "cottonbro studio",
+      "query": "portrait person hair hands",
+      "tags": [
+        "portrait_close"
+      ],
+      "selected_file": {
+        "file_type": "video/mp4",
+        "width": 1366,
+        "height": 720
+      },
+      "duration_seconds": 48.0,
+      "sha256": "226a6405ee63151ef2a78e002de71a3654111d4a3de75b9d97a8333956cdb2ee",
+      "license_url": "https://www.pexels.com/license/"
+    },
+    {
+      "scene_id": "14",
+      "source_type": "pexels",
+      "pexels_id": 6730261,
+      "page_url": "https://www.pexels.com/video/woman-covering-the-half-of-her-face-6730261/",
+      "photographer": "cottonbro studio",
+      "query": "portrait person hair hands",
+      "tags": [
+        "portrait_close"
+      ],
+      "selected_file": {
+        "file_type": "video/mp4",
+        "width": 720,
+        "height": 1366
+      },
+      "duration_seconds": 11.0,
+      "sha256": "c943140a847875edddf2b2dec13a79e15819a898b16c3c25225647544cb183fc",
+      "license_url": "https://www.pexels.com/license/"
+    },
+    {
+      "scene_id": "15",
+      "source_type": "pexels",
+      "pexels_id": 8477237,
+      "page_url": "https://www.pexels.com/video/woman-wearing-a-necklace-8477237/",
+      "photographer": "ArtHouse Studio",
+      "query": "portrait person hair hands",
+      "tags": [
+        "portrait_close"
+      ],
+      "selected_file": {
+        "file_type": "video/mp4",
+        "width": 1280,
+        "height": 720
+      },
+      "duration_seconds": 11.0,
+      "sha256": "ca57dacb4970af490d0a963fbf0a1126ab18a7ceb90c18eb1fbb3e4283446c11",
+      "license_url": "https://www.pexels.com/license/"
+    },
+    {
+      "scene_id": "16",
+      "source_type": "pexels",
+      "pexels_id": 3971886,
+      "page_url": "https://www.pexels.com/video/woman-using-makeup-3971886/",
+      "photographer": "Lina Fresco",
+      "query": "portrait person hair hands",
+      "tags": [
+        "portrait_close"
+      ],
+      "selected_file": {
+        "file_type": "video/mp4",
+        "width": 1280,
+        "height": 720
+      },
+      "duration_seconds": 15.0,
+      "sha256": "c9ad9c30edadc8605bd15bd7b3137c961bcd6b9c80d54e7f0b06911e7ae66f78",
+      "license_url": "https://www.pexels.com/license/"
+    },
+    {
+      "scene_id": "17",
+      "source_type": "pexels",
+      "pexels_id": 6883837,
+      "page_url": "https://www.pexels.com/video/an-interview-being-recorded-in-camera-6883837/",
+      "photographer": "cottonbro studio",
+      "query": "person camera movement foreground",
+      "tags": [
+        "camera_occlusion"
+      ],
+      "selected_file": {
+        "file_type": "video/mp4",
+        "width": 1366,
+        "height": 720
+      },
+      "duration_seconds": 31.0,
+      "sha256": "185b0cb7a579db99e3c2d78add75bf6e581452ca4c374d363d07bc4cb9034092",
+      "license_url": "https://www.pexels.com/license/"
+    },
+    {
+      "scene_id": "18",
+      "source_type": "pexels",
+      "pexels_id": 8171432,
+      "page_url": "https://www.pexels.com/video/a-woman-recording-herself-while-exercising-at-home-8171432/",
+      "photographer": "Kampus Production",
+      "query": "person camera movement foreground",
+      "tags": [
+        "camera_occlusion"
+      ],
+      "selected_file": {
+        "file_type": "video/mp4",
+        "width": 1280,
+        "height": 720
+      },
+      "duration_seconds": 11.0,
+      "sha256": "3b87064383d82aa647d2b08333ff591660d3f3fc7ca1b29fc577611f9b397356",
+      "license_url": "https://www.pexels.com/license/"
+    },
+    {
+      "scene_id": "19",
+      "source_type": "pexels",
+      "pexels_id": 6002533,
+      "page_url": "https://www.pexels.com/video/man-crossing-the-street-6002533/",
+      "photographer": "Mary Taylor",
+      "query": "person camera movement foreground",
+      "tags": [
+        "camera_occlusion"
+      ],
+      "selected_file": {
+        "file_type": "video/mp4",
+        "width": 720,
+        "height": 1280
+      },
+      "duration_seconds": 11.0,
+      "sha256": "dfa53bb77ddf15645aeec4605d03787303bca53db5cba24efbfc5c6dc3a3dc2f",
+      "license_url": "https://www.pexels.com/license/"
+    },
+    {
+      "scene_id": "20",
+      "source_type": "pexels",
+      "pexels_id": 5899391,
+      "page_url": "https://www.pexels.com/video/a-woman-posing-in-the-camera-5899391/",
+      "photographer": "RDNE Stock project",
+      "query": "person camera movement foreground",
+      "tags": [
+        "camera_occlusion"
+      ],
+      "selected_file": {
+        "file_type": "video/mp4",
+        "width": 1280,
+        "height": 720
+      },
+      "duration_seconds": 18.0,
+      "sha256": "02fd914621978932a345a6d3dc85aa8eab2b6229fb83fa43634df4b7e07e12ab",
+      "license_url": "https://www.pexels.com/license/"
     }
   ]
 }
