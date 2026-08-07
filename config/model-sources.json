@@ -1,0 +1,35 @@
+{
+  "depthpro": {
+    "repository": "https://github.com/apple/ml-depth-pro",
+    "revision": "9efe5c1def37a26c5367a71df664b18e1306c708",
+    "checkpoint_url": "https://ml-site.cdn-apple.com/models/depth-pro/depth_pro.pt",
+    "local_checkpoint": "models/depth_pro.pt",
+    "sha256": "3EB35CA68168AD3D14CB150F8947A4EDF85589941661FDB2686259C80685C0CE"
+  },
+  "depth_anything_v2_large": {
+    "repository": "https://github.com/DepthAnything/Depth-Anything-V2",
+    "huggingface_model_id": "depth-anything/Depth-Anything-V2-Large-hf",
+    "revision": "7581137eff8d4e94f6e796d3baea0e9fa79b22d2",
+    "local_cache": "models/huggingface/depth-anything-v2-large",
+    "license": "CC-BY-NC-4.0",
+    "validation_only": true
+  },
+  "video_depth_anything_small": {
+    "repository": "https://github.com/DepthAnything/Video-Depth-Anything",
+    "revision": "4f5ae23172ba60fd7bc11ef671cca678842c7072",
+    "checkpoint_url": "https://huggingface.co/depth-anything/Video-Depth-Anything-Small/resolve/main/video_depth_anything_vits.pth",
+    "local_checkpoint": "models/video_depth_anything_vits.pth",
+    "sha256": "13379300B739E659F076A59D52E9801BD8D38C541A7E71F73BBCA4DCFB013609"
+  },
+  "sea_raft_small": {
+    "repository": "https://github.com/princeton-vl/SEA-RAFT",
+    "revision": "9137517ba24e628442aec097d3afe71d03503b75",
+    "config": "config/eval/spring-S.json",
+    "huggingface_repo": "MemorySlices/Tartan-C-T-TSKH-spring540x960-S",
+    "huggingface_revision": "31b9b4b711bd2d0d0d38cb99d93ba144beb2dc92",
+    "checkpoint_file": "model.safetensors",
+    "local_checkpoint": "models/sea_raft_s.safetensors",
+    "sha256": "D6A75E47F2630BA6C354CE84A322E24C3D9DEF668A6956F340A054B9A3211908",
+    "license": "BSD-3-Clause"
+  }
+}

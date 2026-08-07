@@ -1,189 +1,273 @@
-<mxfile host="Electron" agent="Codex">
-  <diagram id="depthsync-main" name="DepthSync处理流程">
-    <mxGraphModel dx="2175" dy="1294" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" modified="2026-08-05T15:20:00.000Z" agent="Codex" version="30.3.13" pages="5">
+  <diagram id="overview" name="01 总览与时序">
+    <mxGraphModel dx="2200" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2200" pageHeight="1200" math="0" shadow="0">
       <root>
-        <mxCell id="0" />
-        <mxCell id="1" parent="0" />
-        <mxCell id="title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=24;fontStyle=1;fontColor=#1F2937;" value="DepthSync：照片深度引导的视频深度尺度对齐与时域一致性" vertex="1">
-          <mxGeometry height="45" width="1100" x="270" y="20" as="geometry" />
-        </mxCell>
-        <mxCell id="lane-input" parent="1" style="swimlane;html=1;startSize=34;horizontal=1;rounded=1;arcSize=8;fillColor=#E8F0FE;strokeColor=#5B8FF9;fontStyle=1;fontSize=15;" value="输入与预处理" vertex="1">
-          <mxGeometry height="170" width="1570" x="40" y="90" as="geometry" />
-        </mxCell>
-        <mxCell id="video-depth" parent="lane-input" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=14;" value="视频深度序列&#xa;Dᵥ[0…T−1]&#xa;低分辨率 / 尺度漂移" vertex="1">
-          <mxGeometry height="85" width="205" x="35" y="55" as="geometry" />
-        </mxCell>
-        <mxCell id="MVSLxm9QIq6Xhho3FrPC-1" edge="1" parent="lane-input" source="photo-depth" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="video-depth" value="">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="photo-depth" parent="lane-input" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=14;" value="拍照深度 Dₚ&#xa;高分辨率 / 细节丰富&#xa;对应视频锚帧 k" vertex="1">
-          <mxGeometry height="85" width="205" x="275" y="55" as="geometry" />
-        </mxCell>
-        <mxCell id="MVSLxm9QIq6Xhho3FrPC-2" edge="1" parent="lane-input" source="rgb-input" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="photo-depth" value="">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="rgb-input" parent="lane-input" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=14;" value="可选 RGB 视频帧 I[0…T−1]&#xa;用于光流与遮挡判断" vertex="1">
-          <mxGeometry height="85" width="220" x="515" y="55" as="geometry" />
-        </mxCell>
-        <mxCell id="domain" parent="lane-input" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=14;" value="统一工作域&#xa;Depth → inverse depth&#xa;无效值掩码 + resize 到照片分辨率" vertex="1">
-          <mxGeometry height="95" width="270" x="810" y="50" as="geometry" />
-        </mxCell>
-        <mxCell id="anchor-split" parent="lane-input" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=14;fontStyle=1;" value="确定锚点 k&#xa;以 k 为中心建立&#xa;前向 / 后向两条传播链" vertex="1">
-          <mxGeometry height="95" width="240" x="1160" y="50" as="geometry" />
-        </mxCell>
-        <mxCell id="e1" edge="1" parent="lane-input" source="video-depth" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="domain">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="137.56" y="40" />
-              <mxPoint x="945" y="40" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="e2" edge="1" parent="lane-input" source="photo-depth" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;entryX=0.25;entryY=0;entryDx=0;entryDy=0;" target="domain">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="377.56" y="50" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="e3" edge="1" parent="lane-input" source="domain" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="anchor-split">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="lane-anchor" parent="1" style="swimlane;html=1;startSize=34;horizontal=1;rounded=1;arcSize=8;fillColor=#EAF7EA;strokeColor=#82B366;fontStyle=1;fontSize=15;" value="锚帧尺度校准与细节融合" vertex="1">
-          <mxGeometry height="200" width="1570" x="40" y="285" as="geometry" />
-        </mxCell>
-        <mxCell id="anchor-pair" parent="lane-anchor" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=14;" value="配对锚帧&#xa;resize(Dᵥ[k]) ↔ Dₚ&#xa;仅使用共同有效像素" vertex="1">
-          <mxGeometry height="90" width="220" x="40" y="62" as="geometry" />
-        </mxCell>
-        <mxCell id="robust-fit" parent="lane-anchor" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=14;fontStyle=1;" value="鲁棒仿射标定&#xa;Dₚ ≈ aₖDᵥ[k] + bₖ&#xa;分位数初始化 + Huber IRLS" vertex="1">
-          <mxGeometry height="100" width="260" x="330" y="57" as="geometry" />
-        </mxCell>
-        <mxCell id="anchor-base" parent="lane-anchor" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=14;" value="锚点基础深度&#xa;D̂base[k] = aₖDᵥ[k] + bₖ" vertex="1">
-          <mxGeometry height="85" width="220" x="665" y="65" as="geometry" />
-        </mxCell>
-        <mxCell id="detail" parent="lane-anchor" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=14;" value="照片高频残差&#xa;R = HP(Dₚ) − HP(D̂base[k])&#xa;抑制噪声，仅补充结构细节" vertex="1">
-          <mxGeometry height="100" width="270" x="955" y="57" as="geometry" />
-        </mxCell>
-        <mxCell id="anchor-output" parent="lane-anchor" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=14;fontStyle=1;" value="同步锚帧&#xa;D̂[k] = D̂base[k] + λdetail·R&#xa;作为双向传播起点" vertex="1">
-          <mxGeometry height="100" width="245" x="1290" y="57" as="geometry" />
-        </mxCell>
-        <mxCell id="e4" edge="1" parent="lane-anchor" source="anchor-pair" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="robust-fit">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e5" edge="1" parent="lane-anchor" source="robust-fit" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="anchor-base">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e6" edge="1" parent="lane-anchor" source="anchor-base" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="detail">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e7" edge="1" parent="lane-anchor" source="detail" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="anchor-output">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="lane-temporal" parent="1" style="swimlane;html=1;startSize=34;horizontal=1;rounded=1;arcSize=8;fillColor=#F3ECF7;strokeColor=#9673A6;fontStyle=1;fontSize=15;" value="逐帧双向时域传播（k→0 与 k→T−1，以下流程对两个方向重复）" vertex="1">
-          <mxGeometry height="350" width="1570" x="40" y="510" as="geometry" />
-        </mxCell>
-        <mxCell id="next-frame" parent="lane-temporal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=14;" value="取相邻帧 i&#xa;上一同步结果 D̂[j]&#xa;当前原始深度 Dᵥ[i]" vertex="1">
-          <mxGeometry height="90" width="210" x="35" y="65" as="geometry" />
-        </mxCell>
-        <mxCell id="has-rgb" parent="lane-temporal" style="rhombus;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=14;fontStyle=1;" value="提供 RGB？" vertex="1">
-          <mxGeometry height="96" width="145" x="300" y="62" as="geometry" />
-        </mxCell>
-        <mxCell id="flow" parent="lane-temporal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=14;" value="Farnebäck 前后向光流&#xa;将 D̂[j] warp 到 i&#xa;光流往返误差 + 光度误差" vertex="1">
-          <mxGeometry height="105" width="255" x="500" y="45" as="geometry" />
-        </mxCell>
-        <mxCell id="fallback" parent="lane-temporal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=14;" value="无 RGB 降级路径&#xa;同位置传播&#xa;采用保守固定置信度" vertex="1">
-          <mxGeometry height="90" width="255" x="500" y="195" as="geometry" />
-        </mxCell>
-        <mxCell id="confidence" parent="lane-temporal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=14;" value="传播深度 Dwarp[i]&#xa;置信度 Cflow&#xa;遮挡 / 越界 / 大运动自动降权" vertex="1">
-          <mxGeometry height="105" width="260" x="820" y="100" as="geometry" />
-        </mxCell>
-        <mxCell id="frame-fit" parent="lane-temporal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=14;fontStyle=1;" value="当前帧尺度重标定&#xa;Dcal[i] = aᵢDᵥ[i] + bᵢ&#xa;低梯度 + 高置信区域做鲁棒拟合" vertex="1">
-          <mxGeometry height="110" width="290" x="1145" y="45" as="geometry" />
-        </mxCell>
-        <mxCell id="adaptive" parent="lane-temporal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=14;fontStyle=1;" value="自适应时域融合&#xa;w = λtemp·Cflow·exp(−深度分歧)&#xa;D̂[i] = wDwarp[i] + (1−w)Dcal[i]" vertex="1">
-          <mxGeometry height="110" width="330" x="1125" y="205" as="geometry" />
-        </mxCell>
-        <mxCell id="more" parent="lane-temporal" style="rhombus;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=14;fontStyle=1;" value="还有相邻帧？" vertex="1">
-          <mxGeometry height="90" width="155" x="870" y="235" as="geometry" />
-        </mxCell>
-        <mxCell id="e8" edge="1" parent="lane-temporal" source="next-frame" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="has-rgb">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e9" edge="1" parent="lane-temporal" source="has-rgb" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="flow" value="是">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e10" edge="1" parent="lane-temporal" source="has-rgb" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="fallback" value="否">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e11" edge="1" parent="lane-temporal" source="flow" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="confidence">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e12" edge="1" parent="lane-temporal" source="fallback" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="confidence">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e13" edge="1" parent="lane-temporal" source="confidence" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="frame-fit">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e14" edge="1" parent="lane-temporal" source="frame-fit" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="adaptive">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e15" edge="1" parent="lane-temporal" source="adaptive" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="more">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e16" edge="1" parent="lane-temporal" source="more" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="next-frame" value="是：令 j=i，继续">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="780" y="330" />
-              <mxPoint x="140" y="330" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="lane-output" parent="1" style="swimlane;html=1;startSize=34;horizontal=1;rounded=1;arcSize=8;fillColor=#F5F5F5;strokeColor=#666666;fontStyle=1;fontSize=15;" value="输出与应用" vertex="1">
-          <mxGeometry height="190" width="1570" x="40" y="885" as="geometry" />
-        </mxCell>
-        <mxCell id="restore" parent="lane-output" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=14;" value="恢复原始深度域&#xa;inverse depth → depth&#xa;输出采用照片深度分辨率" vertex="1">
-          <mxGeometry height="90" width="245" x="160" y="60" as="geometry" />
-        </mxCell>
-        <mxCell id="sequence-output" parent="lane-output" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=14;fontStyle=1;" value="同步深度序列 D̂[0…T−1]&#xa;统一值域与尺度&#xa;照片/视频切换无明显跳变" vertex="1">
-          <mxGeometry height="105" width="290" x="500" y="52" as="geometry" />
-        </mxCell>
-        <mxCell id="diagnostics" parent="lane-output" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=14;" value="诊断信息&#xa;逐帧 scales / offsets / confidences&#xa;用于阈值监控和异常回退" vertex="1">
-          <mxGeometry height="105" width="295" x="885" y="52" as="geometry" />
-        </mxCell>
-        <mxCell id="bokeh" parent="lane-output" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=14;fontStyle=1;" value="Live Photo 人像虚化&#xa;视频播放与拍照帧共享深度尺度&#xa;提升动态虚化连续性" vertex="1">
-          <mxGeometry height="105" width="260" x="1270" y="52" as="geometry" />
-        </mxCell>
-        <mxCell id="e17" edge="1" parent="lane-output" source="restore" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="sequence-output">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e18" edge="1" parent="lane-output" source="sequence-output" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="diagnostics">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e19" edge="1" parent="lane-output" source="diagnostics" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;" target="bokeh">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="cross1" edge="1" parent="1" source="anchor-split" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#9673A6;" target="anchor-pair" value="锚点数据">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="1320" y="250" />
-              <mxPoint x="190.11" y="250" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="cross2" edge="1" parent="1" source="anchor-output" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#9673A6;" target="next-frame" value="双向初始化">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="cross3" edge="1" parent="1" source="rgb-input" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#D6B656;" target="has-rgb" value="RGB">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="665" y="240" />
-              <mxPoint x="340" y="240" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="cross4" edge="1" parent="1" source="more" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#82B366;" target="restore" value="否：两方向完成">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
+        <mxCell id="0"/><mxCell id="1" parent="0"/>
+        <mxCell id="title" value="DepthSync V4 / V5 总览：Live Photo 深度对齐的离线准备与轻量播放" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=24;fontStyle=1;fontColor=#1f2937;" vertex="1" parent="1"><mxGeometry x="250" y="20" width="1700" height="40" as="geometry"/></mxCell>
+        <mxCell id="subtitle" value="目标：照片锚帧统一尺度与局部质量；视频深度保留时域稳定性；所有不可靠局部校正连续回退 V4" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=14;fontColor=#666666;" vertex="1" parent="1"><mxGeometry x="300" y="65" width="1600" height="30" as="geometry"/></mxCell>
+
+        <mxCell id="capture" value="采集与模型输入" style="swimlane;startSize=32;horizontal=0;rounded=0;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="50" y="120" width="2050" height="210" as="geometry"/></mxCell>
+        <mxCell id="video" value="Live Photo 视频&#xa;T=90，30 fps，约 3 s&#xa;照片时刻 k≈45" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;" vertex="1" parent="capture"><mxGeometry x="70" y="55" width="230" height="100" as="geometry"/></mxCell>
+        <mxCell id="vda" value="Video Depth Anything Small&#xa;stream 模式&#xa;D_t：[T,Hv,Wv] disparity" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="capture"><mxGeometry x="380" y="55" width="260" height="100" as="geometry"/></mxCell>
+        <mxCell id="photo" value="Live Photo 照片&#xa;与视频锚帧对齐&#xa;高分辨率 RGB" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;" vertex="1" parent="capture"><mxGeometry x="720" y="55" width="230" height="100" as="geometry"/></mxCell>
+        <mxCell id="anchor" value="单帧高质量深度&#xa;产品：重模型输出&#xa;离线仿真：DAv2-Large（原 DepthPro）&#xa;P_k：[Hp,Wp] disparity" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="capture"><mxGeometry x="1030" y="45" width="310" height="120" as="geometry"/></mxCell>
+        <mxCell id="rgb" value="RGB 帧序列&#xa;V5 光流输入&#xa;缩放至 144×256" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="capture"><mxGeometry x="1420" y="55" width="230" height="100" as="geometry"/></mxCell>
+        <mxCell id="motion" value="V4：编码器/ISP block MV（可选）&#xa;V5：SEA-RAFT-S 双向 dense flow（必需）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=13;" vertex="1" parent="capture"><mxGeometry x="1730" y="55" width="270" height="100" as="geometry"/></mxCell>
+
+        <mxCell id="prepare" value="拍摄完成后的参数准备阶段（目标预算 1–2 s）" style="swimlane;startSize=32;horizontal=0;rounded=0;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="50" y="360" width="2050" height="280" as="geometry"/></mxCell>
+        <mxCell id="norm" value="坐标/方向统一&#xa;depth→disparity&#xa;照片配准到视频深度坐标" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="prepare"><mxGeometry x="70" y="75" width="250" height="100" as="geometry"/></mxCell>
+        <mxCell id="v4prep" value="V4 全局稳定基线&#xa;锚帧自适应 8/12/16 节点单调 LUT&#xa;MV 约束逐帧微小 scale/offset&#xa;得到 B_0…B_89" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;fontStyle=1;" vertex="1" parent="prepare"><mxGeometry x="410" y="55" width="340" height="140" as="geometry"/></mxCell>
+        <mxCell id="v5decision" value="启用 V5 且&#xa;RGB / flow 有效？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;fontStyle=1;" vertex="1" parent="prepare"><mxGeometry x="850" y="65" width="190" height="120" as="geometry"/></mxCell>
+        <mxCell id="flowprep" value="SEA-RAFT-S&#xa;89 对相邻帧双向光流&#xa;FB/越界/外观/切镜置信度" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" vertex="1" parent="prepare"><mxGeometry x="1140" y="45" width="290" height="160" as="geometry"/></mxCell>
+        <mxCell id="localprep" value="V5 局部 affine 场&#xa;锚帧 36×64 robust fit&#xa;沿可靠光流向前/向后纯传输&#xa;遮挡/新显露区域回到 identity" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;fontStyle=1;" vertex="1" parent="prepare"><mxGeometry x="1530" y="45" width="350" height="160" as="geometry"/></mxCell>
+        <mxCell id="v4fallback" value="V4 参数包&#xa;安全基线" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;fontStyle=1;" vertex="1" parent="prepare"><mxGeometry x="1900" y="75" width="120" height="100" as="geometry"/></mxCell>
+
+        <mxCell id="package" value="持久化参数（模型和中间 flow 均不进入播放包）" style="swimlane;startSize=32;horizontal=0;rounded=0;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="50" y="670" width="2050" height="150" as="geometry"/></mxCell>
+        <mxCell id="v4pack" value="V4：共享 16 节点 LUT + 90 帧 scale/offset&#xa;推荐约 0.5–0.6 KiB / Live Photo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;" vertex="1" parent="package"><mxGeometry x="180" y="50" width="450" height="70" as="geometry"/></mxCell>
+        <mxCell id="v5pack" value="V5：Δscale / offset_norm / confidence&#xa;90×36×64×3×FP16 = 1,244,160 B（约 1.19 MiB）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" vertex="1" parent="package"><mxGeometry x="820" y="50" width="520" height="70" as="geometry"/></mxCell>
+        <mxCell id="notpack" value="不保存：照片残差图、人物 mask、dense flow、光流模型运行态&#xa;depth_low 可由当前 B_t 降采样，不计入产品参数包" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=13;" vertex="1" parent="package"><mxGeometry x="1520" y="45" width="450" height="80" as="geometry"/></mxCell>
+
+        <mxCell id="runtime" value="播放阶段（逐帧，无照片深度、无光流模型）" style="swimlane;startSize=32;horizontal=0;rounded=0;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="50" y="850" width="2050" height="250" as="geometry"/></mxCell>
+        <mxCell id="rtin" value="当前视频深度 D_t" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="runtime"><mxGeometry x="90" y="85" width="200" height="70" as="geometry"/></mxCell>
+        <mxCell id="rtv4" value="V4 LUT + 帧级标量&#xa;B_t" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;fontStyle=1;" vertex="1" parent="runtime"><mxGeometry x="390" y="75" width="230" height="90" as="geometry"/></mxCell>
+        <mxCell id="rtv5d" value="该帧 V5 局部场有效？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;" vertex="1" parent="runtime"><mxGeometry x="740" y="65" width="190" height="110" as="geometry"/></mxCell>
+        <mxCell id="rtup" value="2×2 网格 gather&#xa;+ V4 深度引导 bilateral 上采样&#xa;+ confidence blend" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" vertex="1" parent="runtime"><mxGeometry x="1060" y="65" width="300" height="110" as="geometry"/></mxCell>
+        <mxCell id="rtout" value="同步深度 Y_t&#xa;用于 Live Photo 人像虚化" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;fontStyle=1;" vertex="1" parent="runtime"><mxGeometry x="1510" y="65" width="260" height="110" as="geometry"/></mxCell>
+        <mxCell id="identity" value="c=0 / V5 禁用&#xa;Y_t ≡ B_t（逐像素严格回退）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;" vertex="1" parent="runtime"><mxGeometry x="1840" y="70" width="180" height="100" as="geometry"/></mxCell>
+
+        <mxCell id="e1" edge="1" parent="1" source="video" target="vda" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="photo" target="anchor" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="vda" target="norm" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.75;entryY=0;"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="560" y="345"/><mxPoint x="310" y="345"/></Array></mxGeometry></mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="anchor" target="norm" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=1;entryY=0.5;"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1235" y="350"/><mxPoint x="390" y="350"/><mxPoint x="390" y="485"/></Array></mxGeometry></mxCell>
+        <mxCell id="e5" edge="1" parent="1" source="norm" target="v4prep" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6" edge="1" parent="1" source="v4prep" target="v5decision" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7" value="是" edge="1" parent="1" source="v5decision" target="flowprep" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e8" edge="1" parent="1" source="flowprep" target="localprep" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e9" value="否 / 异常" edge="1" parent="1" source="v5decision" target="v4fallback" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;strokeColor=#b85450;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=1;"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="995" y="655"/><mxPoint x="2010" y="655"/></Array></mxGeometry></mxCell>
+        <mxCell id="e10" edge="1" parent="1" source="v4prep" target="v4pack" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e11" edge="1" parent="1" source="localprep" target="v5pack" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e12" edge="1" parent="1" source="rtin" target="rtv4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e13" edge="1" parent="1" source="rtv4" target="rtv5d" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e14" value="是" edge="1" parent="1" source="rtv5d" target="rtup" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e15" edge="1" parent="1" source="rtup" target="rtout" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e16" value="否" edge="1" parent="1" source="rtv5d" target="identity" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;strokeColor=#b85450;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=1;"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="885" y="1080"/><mxPoint x="1980" y="1080"/></Array></mxGeometry></mxCell>
+        <mxCell id="e17" edge="1" parent="1" source="identity" target="rtout" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#b85450;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="v4-detail" name="02 V4 全局单调对齐">
+    <mxGraphModel dx="2200" dy="1200" grid="1" gridSize="10" guides="1" page="1" pageScale="1" pageWidth="2200" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/><mxCell id="1" parent="0"/>
+        <mxCell id="t" value="V4：全局单调 LUT + 受约束帧级微调（默认无空间区域边界）" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=24;fontStyle=1;fontColor=#1f2937;" vertex="1" parent="1"><mxGeometry x="300" y="20" width="1600" height="40" as="geometry"/></mxCell>
+        <mxCell id="io" value="A. 输入与预处理" style="swimlane;startSize=32;horizontal=0;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="50" y="100" width="2050" height="190" as="geometry"/></mxCell>
+        <mxCell id="d" value="D_t：[T,Hv,Wv]&#xa;FP16/FP32&#xa;disparity 越大越近" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;" vertex="1" parent="io"><mxGeometry x="70" y="50" width="230" height="95" as="geometry"/></mxCell>
+        <mxCell id="p" value="P_k：[Hp,Wp]&#xa;高质量照片 disparity&#xa;仅准备阶段使用" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;" vertex="1" parent="io"><mxGeometry x="370" y="50" width="250" height="95" as="geometry"/></mxCell>
+        <mxCell id="work" value="_to_working&#xa;metric depth → 1/max(depth,eps)&#xa;统一到 disparity 域" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="io"><mxGeometry x="700" y="50" width="280" height="95" as="geometry"/></mxCell>
+        <mxCell id="align" value="_align_photo&#xa;标定 grid / resize&#xa;对齐至锚帧深度坐标 [Hv,Wv]" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="io"><mxGeometry x="1060" y="50" width="300" height="95" as="geometry"/></mxCell>
+        <mxCell id="sample" value="确定性稀疏采样（默认 2048）&#xa;有限值 + 低梯度优先&#xa;有 face_box 时约 30% 样本来自 ROI&#xa;face_box 不是人物分割 mask" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="io"><mxGeometry x="1450" y="40" width="390" height="115" as="geometry"/></mxCell>
+        <mxCell id="mv" value="可选 block MV&#xa;归一化位移 + confidence&#xa;只用于准备阶段" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=13;" vertex="1" parent="io"><mxGeometry x="1900" y="50" width="120" height="95" as="geometry"/></mxCell>
+
+        <mxCell id="anchorLane" value="B. 锚帧全局映射拟合" style="swimlane;startSize=32;horizontal=0;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="50" y="320" width="2050" height="270" as="geometry"/></mxCell>
+        <mxCell id="robust" value="鲁棒清洗&#xa;分位数 / MAD&#xa;robust affine 拒绝 gross mismatch" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="anchorLane"><mxGeometry x="70" y="75" width="260" height="105" as="geometry"/></mxCell>
+        <mxCell id="c8" value="候选 LUT：8 节点&#xa;等量分箱 → 加权中位数&#xa;isotonic 单调回归" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;" vertex="1" parent="anchorLane"><mxGeometry x="420" y="45" width="270" height="90" as="geometry"/></mxCell>
+        <mxCell id="c12" value="候选 LUT：12 节点&#xa;等量分箱 → 加权中位数&#xa;isotonic 单调回归" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;" vertex="1" parent="anchorLane"><mxGeometry x="420" y="145" width="270" height="90" as="geometry"/></mxCell>
+        <mxCell id="c16" value="候选 LUT：16 节点&#xa;等量分箱 → 加权中位数&#xa;isotonic 单调回归" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;" vertex="1" parent="anchorLane"><mxGeometry x="770" y="95" width="270" height="90" as="geometry"/></mxCell>
+        <mxCell id="score" value="候选评分&#xa;全图锚帧 NMAE&#xa;+ face ROI NMAE（若有）&#xa;选择最小组合误差" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;" vertex="1" parent="anchorLane"><mxGeometry x="1130" y="75" width="230" height="130" as="geometry"/></mxCell>
+        <mxCell id="canon" value="定长化&#xa;选中形状重采样为 16 节点&#xa;共享 anchor_lut_x / anchor_lut_y" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;fontStyle=1;" vertex="1" parent="anchorLane"><mxGeometry x="1450" y="80" width="300" height="115" as="geometry"/></mxCell>
+        <mxCell id="afffb" value="支持不足？&#xa;回退鲁棒 affine&#xa;并编码为 16 节点 LUT" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;" vertex="1" parent="anchorLane"><mxGeometry x="1840" y="80" width="180" height="115" as="geometry"/></mxCell>
+
+        <mxCell id="temporal" value="C. 从锚帧向前 / 向后传播全局参数" style="swimlane;startSize=32;horizontal=0;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="50" y="620" width="2050" height="270" as="geometry"/></mxCell>
+        <mxCell id="premap" value="当前帧先应用共享 LUT&#xa;D_i → LUT(D_i)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;" vertex="1" parent="temporal"><mxGeometry x="70" y="80" width="240" height="90" as="geometry"/></mxCell>
+        <mxCell id="corr" value="稀疏时序对应&#xa;MV 将当前样本映射至相邻已处理帧&#xa;越界与低 confidence 降权" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="temporal"><mxGeometry x="390" y="65" width="300" height="120" as="geometry"/></mxCell>
+        <mxCell id="fit" value="只拟合小幅全局微调&#xa;candidate scale_i / offset_i&#xa;鲁棒 affine + fit confidence" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;" vertex="1" parent="temporal"><mxGeometry x="780" y="65" width="290" height="120" as="geometry"/></mxCell>
+        <mxCell id="smooth" value="置信度加权平滑&#xa;逐帧限幅：scale ≤ ±1%&#xa;offset ≤ ±0.5% photo range" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;" vertex="1" parent="temporal"><mxGeometry x="1160" y="65" width="290" height="120" as="geometry"/></mxCell>
+        <mxCell id="lock" value="锚点锁定与渐进解锁&#xa;锁定半径内复用锚帧 LUT&#xa;避免拍照时刻参数状态切换" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;" vertex="1" parent="temporal"><mxGeometry x="1540" y="65" width="290" height="120" as="geometry"/></mxCell>
+        <mxCell id="insuff" value="时序支持不足&#xa;复用上一帧参数&#xa;记录 fallback reason" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;" vertex="1" parent="temporal"><mxGeometry x="1900" y="70" width="120" height="110" as="geometry"/></mxCell>
+
+        <mxCell id="outLane" value="D. V4 播放与关键性质" style="swimlane;startSize=32;horizontal=0;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="50" y="920" width="2050" height="220" as="geometry"/></mxCell>
+        <mxCell id="eq" value="每帧输出&#xa;B_i = scale_i · LUT(D_i) + offset_i&#xa;实现中 lut_y 已吸收该微调" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;fontStyle=1;" vertex="1" parent="outLane"><mxGeometry x="100" y="65" width="360" height="110" as="geometry"/></mxCell>
+        <mxCell id="global" value="位置无关：同一 disparity 使用同一映射&#xa;默认 region_grid_shape=(0,0)&#xa;不生成 mask 边界、竖缝、“7”形分层或残差拖影" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;" vertex="1" parent="outLane"><mxGeometry x="570" y="55" width="440" height="130" as="geometry"/></mxCell>
+        <mxCell id="cost" value="播放成本 / 像素&#xa;16 节点区间定位 + 1 次线性插值&#xa;+ 1 次全局 scale/offset&#xa;无 MV、无照片、无 warp" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;" vertex="1" parent="outLane"><mxGeometry x="1120" y="55" width="360" height="130" as="geometry"/></mxCell>
+        <mxCell id="limit" value="表达上限&#xa;只能按深度值全局映射&#xa;当人物 / 墙面同值但需要不同校正时无法同时满足&#xa;这正是 V5 引入局部场的原因" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;fontStyle=1;" vertex="1" parent="outLane"><mxGeometry x="1590" y="50" width="400" height="140" as="geometry"/></mxCell>
+
+        <mxCell id="a1" edge="1" parent="1" source="d" target="work" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a2" edge="1" parent="1" source="p" target="work" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a3" edge="1" parent="1" source="work" target="align" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a4" edge="1" parent="1" source="align" target="sample" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a5" edge="1" parent="1" source="sample" target="robust" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1695" y="305"/><mxPoint x="250" y="305"/></Array></mxGeometry></mxCell>
+        <mxCell id="a6" edge="1" parent="1" source="robust" target="c8" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a7" edge="1" parent="1" source="robust" target="c12" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a9" edge="1" parent="1" source="c8" target="score" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;exitX=0.5;exitY=0;entryX=0.25;entryY=0;"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="605" y="345"/><mxPoint x="1235" y="345"/></Array></mxGeometry></mxCell>
+        <mxCell id="a10" edge="1" parent="1" source="c12" target="score" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.75;entryY=1;"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="605" y="585"/><mxPoint x="1350" y="585"/></Array></mxGeometry></mxCell>
+        <mxCell id="a11" edge="1" parent="1" source="c16" target="score" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a12" value="有效" edge="1" parent="1" source="score" target="canon" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a13" value="支持不足" edge="1" parent="1" source="score" target="afffb" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;strokeColor=#b85450;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a14" edge="1" parent="1" source="canon" target="premap" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1650" y="605"/><mxPoint x="240" y="605"/></Array></mxGeometry></mxCell>
+        <mxCell id="a15" edge="1" parent="1" source="premap" target="corr" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a16" edge="1" parent="1" source="corr" target="fit" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a17" edge="1" parent="1" source="fit" target="smooth" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a18" edge="1" parent="1" source="smooth" target="lock" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a19" value="失败" edge="1" parent="1" source="fit" target="insuff" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;strokeColor=#b85450;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a20" edge="1" parent="1" source="lock" target="eq" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1735" y="905"/><mxPoint x="330" y="905"/></Array></mxGeometry></mxCell>
+        <mxCell id="a21" edge="1" parent="1" source="eq" target="global" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a22" edge="1" parent="1" source="global" target="cost" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a23" edge="1" parent="1" source="cost" target="limit" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="v5-detail" name="03 V5 局部场准备">
+    <mxGraphModel dx="2200" dy="1200" grid="1" gridSize="10" guides="1" page="1" pageScale="1" pageWidth="2200" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/><mxCell id="1" parent="0"/>
+        <mxCell id="t" value="V5 拍后准备：锚帧局部 affine 拟合 → 双向光流可信传播 → 低分辨率参数包" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=24;fontStyle=1;fontColor=#1f2937;" vertex="1" parent="1"><mxGeometry x="260" y="20" width="1700" height="40" as="geometry"/></mxCell>
+        <mxCell id="baseLane" value="A. 稳定基础与光流可靠性" style="swimlane;startSize=32;horizontal=0;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="50" y="100" width="2050" height="230" as="geometry"/></mxCell>
+        <mxCell id="v4" value="完整执行 V4&#xa;得到 B_0…B_89&#xa;V5 只学习其有限局部增量" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;fontStyle=1;" vertex="1" parent="baseLane"><mxGeometry x="70" y="65" width="260" height="110" as="geometry"/></mxCell>
+        <mxCell id="rgb" value="RGB 90 帧&#xa;缩放至 144×256" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="baseLane"><mxGeometry x="410" y="75" width="220" height="90" as="geometry"/></mxCell>
+        <mxCell id="raft" value="SEA-RAFT-S&#xa;89 对 × 正反两个方向&#xa;可合并双向 batch" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" vertex="1" parent="baseLane"><mxGeometry x="710" y="60" width="270" height="120" as="geometry"/></mxCell>
+        <mxCell id="fb" value="连续 flow confidence&#xa;模型置信度 × FB consistency&#xa;× in-bounds × 亮度/梯度一致性" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" vertex="1" parent="baseLane"><mxGeometry x="1060" y="55" width="320" height="130" as="geometry"/></mxCell>
+        <mxCell id="cut" value="切镜检测&#xa;32×18 luminance robust diff&#xa;cut 边界两向 confidence=0" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;" vertex="1" parent="baseLane"><mxGeometry x="1460" y="60" width="290" height="120" as="geometry"/></mxCell>
+        <mxCell id="flowdata" value="DenseFlowSequence&#xa;to_next / to_previous：[89,144,256,2]&#xa;confidence_*：[89,144,256]&#xa;scene_cuts：[89]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" vertex="1" parent="baseLane"><mxGeometry x="1830" y="45" width="190" height="150" as="geometry"/></mxCell>
+
+        <mxCell id="fitLane" value="B. 锚帧 k 的 36×64 局部 affine 拟合" style="swimlane;startSize=32;horizontal=0;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="50" y="360" width="2050" height="300" as="geometry"/></mxCell>
+        <mxCell id="pair" value="拟合数据对&#xa;source = B_k&#xa;target = 对齐并降采样的 P_k&#xa;photo_range = P90 − P10" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="fitLane"><mxGeometry x="70" y="80" width="260" height="130" as="geometry"/></mxCell>
+        <mxCell id="windows" value="每个网格节点&#xa;中心覆盖约 2.5×网格间距的重叠窗口&#xa;有效像素至少 24&#xa;重叠用于消除块边界" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" vertex="1" parent="fitLane"><mxGeometry x="410" y="70" width="300" height="150" as="geometry"/></mxCell>
+        <mxCell id="irls" value="两轮 robust IRLS&#xa;Tukey 权重（MAD 尺度）&#xa;+ scale / offset ridge prior&#xa;min Σw|aB+b−P|² + λa|a−1|² + λb|b|²" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" vertex="1" parent="fitLane"><mxGeometry x="790" y="60" width="360" height="170" as="geometry"/></mxCell>
+        <mxCell id="bounds" value="Box 约束 + 交替重优化&#xa;a ∈ [0.5,1.5]&#xa;b/photo_range ∈ [−0.35,0.35]&#xa;序列存 Δa=a−1 与 b_norm" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" vertex="1" parent="fitLane"><mxGeometry x="1230" y="65" width="320" height="160" as="geometry"/></mxCell>
+        <mxCell id="conf" value="节点拟合置信度 c_k&#xa;support × residual_score × condition_score&#xa;支持不足：Δa=0，b=0，c=0（identity）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;" vertex="1" parent="fitLane"><mxGeometry x="1590" y="65" width="280" height="160" as="geometry"/></mxCell>
+        <mxCell id="smooth" value="锚帧仅一次&#xa;confidence 加权&#xa;3×3 平滑&#xa;传播后不再重平滑" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;" vertex="1" parent="fitLane"><mxGeometry x="1900" y="75" width="120" height="140" as="geometry"/></mxCell>
+
+        <mxCell id="propLane" value="C. 参数沿真实运动轨迹纯传输（从 k 向两侧扫描）" style="swimlane;startSize=32;horizontal=0;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="50" y="690" width="2050" height="300" as="geometry"/></mxCell>
+        <mxCell id="resize" value="flow / confidence&#xa;缩放至 36×64 网格&#xa;位移同步缩放到网格单位" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="propLane"><mxGeometry x="70" y="85" width="250" height="120" as="geometry"/></mxCell>
+        <mxCell id="remap" value="current→previous remap&#xa;warp q_prev 与 c_prev&#xa;q=[Δa,b_norm]&#xa;border 常量为 0" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" vertex="1" parent="propLane"><mxGeometry x="400" y="75" width="280" height="140" as="geometry"/></mxCell>
+        <mxCell id="vis" value="smoothstep visibility&#xa;u=clamp((r−0.05)/(0.25−0.05))&#xa;visibility=u²(3−2u)&#xa;c_t=warp(c_prev)×visibility" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;" vertex="1" parent="propLane"><mxGeometry x="760" y="65" width="330" height="160" as="geometry"/></mxCell>
+        <mxCell id="active" value="c_t &gt; eps？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;fontStyle=1;" vertex="1" parent="propLane"><mxGeometry x="1170" y="85" width="170" height="120" as="geometry"/></mxCell>
+        <mxCell id="keep" value="是：保持 warped q&#xa;可信轨迹不再加正则&#xa;避免参数场“呼吸”" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;" vertex="1" parent="propLane"><mxGeometry x="1430" y="55" width="280" height="110" as="geometry"/></mxCell>
+        <mxCell id="zero" value="否 / 切镜 / 遮挡 / 越界&#xa;q=0，c=0&#xa;新显露区域回到 V4 identity&#xa;不继承最近有效参数" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;fontStyle=1;" vertex="1" parent="propLane"><mxGeometry x="1430" y="175" width="330" height="95" as="geometry"/></mxCell>
+        <mxCell id="seq" value="输出 LocalFieldSequence&#xa;Δscale / offset_norm / confidence / depth_low&#xa;shape=[90,36,64]，内部 FP32&#xa;持久化前三通道 FP16" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;fontStyle=1;" vertex="1" parent="propLane"><mxGeometry x="1830" y="65" width="190" height="170" as="geometry"/></mxCell>
+
+        <mxCell id="note" value="设计禁区（防止历史缺陷复现）：不传播照片深度/残差；不传播人物 mask；不在每帧重新拟合或重新空间正则；不让高 confidence 在长序列中无条件累乘衰减。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=14;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="200" y="1030" width="1800" height="90" as="geometry"/></mxCell>
+
+        <mxCell id="b1" edge="1" parent="1" source="rgb" target="raft" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b2" edge="1" parent="1" source="raft" target="fb" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b3" edge="1" parent="1" source="fb" target="cut" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b4" edge="1" parent="1" source="cut" target="flowdata" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b5" edge="1" parent="1" source="v4" target="pair" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b6" edge="1" parent="1" source="pair" target="windows" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b7" edge="1" parent="1" source="windows" target="irls" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b8" edge="1" parent="1" source="irls" target="bounds" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b9" edge="1" parent="1" source="bounds" target="conf" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b10" edge="1" parent="1" source="conf" target="smooth" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b11" edge="1" parent="1" source="flowdata" target="resize" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.25;entryY=0;"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1975" y="345"/><mxPoint x="400" y="345"/><mxPoint x="400" y="675"/><mxPoint x="180" y="675"/></Array></mxGeometry></mxCell>
+        <mxCell id="b12" edge="1" parent="1" source="smooth" target="remap" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.75;entryY=0;"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="2010" y="675"/><mxPoint x="610" y="675"/></Array></mxGeometry></mxCell>
+        <mxCell id="b13" edge="1" parent="1" source="resize" target="remap" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b14" edge="1" parent="1" source="remap" target="vis" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b15" edge="1" parent="1" source="vis" target="active" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b16" value="是" edge="1" parent="1" source="active" target="keep" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b17" value="否" edge="1" parent="1" source="active" target="zero" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;strokeColor=#b85450;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b18" edge="1" parent="1" source="keep" target="seq" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b19" edge="1" parent="1" source="zero" target="seq" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#b85450;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="runtime" name="04 播放与数据规格">
+    <mxGraphModel dx="2200" dy="1200" grid="1" gridSize="10" guides="1" page="1" pageScale="1" pageWidth="2200" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/><mxCell id="1" parent="0"/>
+        <mxCell id="t" value="V4 / V5 播放内核与中间数据规格" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=24;fontStyle=1;fontColor=#1f2937;" vertex="1" parent="1"><mxGeometry x="450" y="20" width="1300" height="40" as="geometry"/></mxCell>
+        <mxCell id="play" value="A. 每帧播放流程" style="swimlane;startSize=32;horizontal=0;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="50" y="90" width="2050" height="330" as="geometry"/></mxCell>
+        <mxCell id="d" value="视频模型深度 D_t&#xa;[Hv,Wv] FP16/定点" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="play"><mxGeometry x="60" y="90" width="210" height="90" as="geometry"/></mxCell>
+        <mxCell id="lut" value="V4 LUT 内核&#xa;16 节点定位 + 线性插值&#xa;+ 帧级 scale/offset&#xa;输出稳定基础 B_t" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;fontStyle=1;" vertex="1" parent="play"><mxGeometry x="350" y="70" width="280" height="130" as="geometry"/></mxCell>
+        <mxCell id="field" value="读取 t 帧参数&#xa;Δa_t / b_norm_t / c_t&#xa;每通道 36×64 FP16&#xa;当前帧合计 13,824 B" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" vertex="1" parent="play"><mxGeometry x="720" y="65" width="270" height="140" as="geometry"/></mxCell>
+        <mxCell id="fast" value="max(c_t) &gt; 0？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;fontStyle=1;" vertex="1" parent="play"><mxGeometry x="1080" y="80" width="170" height="110" as="geometry"/></mxCell>
+        <mxCell id="gather" value="深度引导 2×2 gather&#xa;spatial bilinear × exp(−|B_t−B_low|/σd)&#xa;σd = 0.04 × V4 guide robust range&#xa;注意：不使用 DAv2 原始 photo range 作为边缘阈值" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" vertex="1" parent="play"><mxGeometry x="1340" y="55" width="390" height="160" as="geometry"/></mxCell>
+        <mxCell id="blend" value="归一化局部参数与 confidence&#xa;correction = Δa·B_t + b_norm·photo_range&#xa;Y_t = B_t + c·correction&#xa;再裁剪到 a∈[0.5,1.5]、b_norm∈[−0.35,0.35]" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;fontStyle=1;" vertex="1" parent="play"><mxGeometry x="1810" y="45" width="210" height="180" as="geometry"/></mxCell>
+        <mxCell id="identity" value="否：identity 快路径&#xa;直接复制 B_t&#xa;与 V4 逐位一致" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;fontStyle=1;" vertex="1" parent="play"><mxGeometry x="1080" y="225" width="220" height="80" as="geometry"/></mxCell>
+        <mxCell id="out" value="同步深度 Y_t" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;fontStyle=1;" vertex="1" parent="play"><mxGeometry x="1810" y="245" width="210" height="60" as="geometry"/></mxCell>
+
+        <mxCell id="spec" value="B. 数据规格与生命周期（90 帧示例）" style="swimlane;startSize=32;horizontal=0;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="50" y="450" width="2050" height="420" as="geometry"/></mxCell>
+        <mxCell id="s1" value="RGB 视频&#xa;90×256×455×3 uint8&#xa;输入 / 验证原型&#xa;flow 前 resize→144×256" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="spec"><mxGeometry x="60" y="65" width="240" height="120" as="geometry"/></mxCell>
+        <mxCell id="s2" value="视频 disparity&#xa;90×256×455 FP32（原型）&#xa;输入 + 播放&#xa;产品可 FP16 / 定点" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="spec"><mxGeometry x="340" y="65" width="240" height="120" as="geometry"/></mxCell>
+        <mxCell id="s3" value="照片 disparity&#xa;示例 1080×1920 FP32&#xa;仅准备阶段&#xa;配准后降至视频坐标" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=12;" vertex="1" parent="spec"><mxGeometry x="620" y="65" width="240" height="120" as="geometry"/></mxCell>
+        <mxCell id="s4" value="双向 flow&#xa;2×89×144×256×2 FP16 缓存&#xa;confidence：2×89×144×256 FP16&#xa;只准备阶段，可流式边算边消费" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" vertex="1" parent="spec"><mxGeometry x="900" y="55" width="280" height="140" as="geometry"/></mxCell>
+        <mxCell id="s5" value="V4 播放包&#xa;共享 LUT x/y：16×2 FP16 = 64 B&#xa;逐帧 scale/offset：90×2 FP16 = 360 B&#xa;+ header / range / flags ≈ 64–128 B" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=12;fontStyle=1;" vertex="1" parent="spec"><mxGeometry x="1220" y="50" width="320" height="150" as="geometry"/></mxCell>
+        <mxCell id="s6" value="V5 播放包&#xa;Δscale：90×36×64 FP16&#xa;offset_norm：同上；confidence：同上&#xa;总计 1,244,160 B ≈ 1.19 MiB" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;fontStyle=1;" vertex="1" parent="spec"><mxGeometry x="1580" y="50" width="300" height="150" as="geometry"/></mxCell>
+        <mxCell id="s7" value="depth_low&#xa;90×36×64 FP16&#xa;Python 诊断缓存&#xa;产品从当前 B_t 降采样，不下发" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" vertex="1" parent="spec"><mxGeometry x="1920" y="55" width="100" height="140" as="geometry"/></mxCell>
+        <mxCell id="offlineCost" value="准备阶段主耗时&#xa;178 次方向推理（89 对×双向）&#xa;局部 IRLS / remap / FP16 序列化远小于光流&#xa;目标 NPU/GPU 必须实测 1–2 s wall time、峰值内存与热状态" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;" vertex="1" parent="spec"><mxGeometry x="120" y="245" width="570" height="120" as="geometry"/></mxCell>
+        <mxCell id="runtimeCost" value="播放阶段主操作&#xa;V4 LUT + 4 邻点 gather + 4 次深度权重 + 归一化 + confidence blend&#xa;exp 可替换为小 LUT / fast-exp / GPU texture；CPU 可 C++/NEON 向量化&#xa;NumPy 原型约 17–18 ms/帧，仅作功能参考" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;" vertex="1" parent="spec"><mxGeometry x="810" y="235" width="650" height="140" as="geometry"/></mxCell>
+        <mxCell id="opt" value="进一步端侧优化选项（需重新验证边缘）&#xa;1) INT8/INT16 量化局部场；2) flow 流式计算避免整段缓存；&#xa;3) 双向 batch / 帧对并行；4) 将深度权重离散为少量 bin；&#xa;5) 若播放预算严格，在准备阶段烘焙到更高网格。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" vertex="1" parent="spec"><mxGeometry x="1580" y="225" width="440" height="160" as="geometry"/></mxCell>
+
+        <mxCell id="legend" value="颜色图例" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#666666;verticalAlign=top;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="300" y="910" width="1600" height="180" as="geometry"/></mxCell>
+        <mxCell id="l1" value="输入/基础处理" style="rounded=0;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="legend"><mxGeometry x="40" y="50" width="250" height="40" as="geometry"/></mxCell>
+        <mxCell id="l2" value="V4 全局路径" style="rounded=0;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="legend"><mxGeometry x="350" y="50" width="250" height="40" as="geometry"/></mxCell>
+        <mxCell id="l3" value="V5 局部路径" style="rounded=0;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="legend"><mxGeometry x="660" y="50" width="250" height="40" as="geometry"/></mxCell>
+        <mxCell id="l4" value="成功输出/轻量播放" style="rounded=0;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="legend"><mxGeometry x="970" y="50" width="250" height="40" as="geometry"/></mxCell>
+        <mxCell id="l5" value="决策/约束" style="rounded=0;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="legend"><mxGeometry x="1280" y="50" width="250" height="40" as="geometry"/></mxCell>
+        <mxCell id="l6" value="异常/回退" style="rounded=0;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="legend"><mxGeometry x="350" y="110" width="250" height="40" as="geometry"/></mxCell>
+        <mxCell id="l7" value="中间量/不下发" style="rounded=0;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="legend"><mxGeometry x="970" y="110" width="250" height="40" as="geometry"/></mxCell>
+
+        <mxCell id="c1" edge="1" parent="1" source="d" target="lut" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c2" edge="1" parent="1" source="lut" target="fast" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c3" edge="1" parent="1" source="field" target="fast" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c4" value="是" edge="1" parent="1" source="fast" target="gather" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c5" edge="1" parent="1" source="gather" target="blend" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c6" value="否" edge="1" parent="1" source="fast" target="identity" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;strokeColor=#b85450;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c7" edge="1" parent="1" source="blend" target="out" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c8" edge="1" parent="1" source="identity" target="out" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#b85450;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="fallback-validation" name="05 回退与验证闭环">
+    <mxGraphModel dx="2200" dy="1200" grid="1" gridSize="10" guides="1" page="1" pageScale="1" pageWidth="2200" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/><mxCell id="1" parent="0"/>
+        <mxCell id="t" value="V4 / V5 健壮性、验收门槛与版本决策" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=24;fontStyle=1;fontColor=#1f2937;" vertex="1" parent="1"><mxGeometry x="450" y="20" width="1300" height="40" as="geometry"/></mxCell>
+        <mxCell id="fallback" value="A. 分层回退决策" style="swimlane;startSize=32;horizontal=0;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="50" y="90" width="2050" height="430" as="geometry"/></mxCell>
+        <mxCell id="start" value="准备 V5" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;fontStyle=1;" vertex="1" parent="fallback"><mxGeometry x="70" y="90" width="150" height="70" as="geometry"/></mxCell>
+        <mxCell id="flowok" value="模型/权重、RGB、flow shape、&#xa;T−1 长度、NaN 检查均有效？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;" vertex="1" parent="fallback"><mxGeometry x="300" y="70" width="260" height="110" as="geometry"/></mxCell>
+        <mxCell id="wholev4" value="整段 V4&#xa;local_fields=None&#xa;记录 v5_flow_unavailable /&#xa;v5_invalid_local_data" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;fontStyle=1;" vertex="1" parent="fallback"><mxGeometry x="310" y="250" width="240" height="120" as="geometry"/></mxCell>
+        <mxCell id="cut" value="相邻帧是切镜？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;" vertex="1" parent="fallback"><mxGeometry x="650" y="75" width="190" height="100" as="geometry"/></mxCell>
+        <mxCell id="zerocut" value="切镜边界两向 c=0&#xa;禁止跨边界传播&#xa;边界另一侧回退 V4" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;" vertex="1" parent="fallback"><mxGeometry x="640" y="250" width="220" height="110" as="geometry"/></mxCell>
+        <mxCell id="corr" value="当前网格对应是否&#xa;越界 / 遮挡 / FB 不一致 / 低外观一致？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;" vertex="1" parent="fallback"><mxGeometry x="940" y="65" width="280" height="120" as="geometry"/></mxCell>
+        <mxCell id="fade" value="连续降低 visibility 与 c&#xa;不做二值硬 mask&#xa;c→0 时平滑回到 identity" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;" vertex="1" parent="fallback"><mxGeometry x="960" y="250" width="240" height="110" as="geometry"/></mxCell>
+        <mxCell id="support" value="锚帧局部窗口&#xa;有效样本 ≥24 且条件数可接受？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;" vertex="1" parent="fallback"><mxGeometry x="1320" y="65" width="250" height="120" as="geometry"/></mxCell>
+        <mxCell id="nodeid" value="节点 identity&#xa;Δa=0，b=0，c=0&#xa;不插值出无依据校正" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;" vertex="1" parent="fallback"><mxGeometry x="1330" y="250" width="230" height="110" as="geometry"/></mxCell>
+        <mxCell id="serial" value="参数反序列化 / bounds / finite 检查有效？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;" vertex="1" parent="fallback"><mxGeometry x="1630" y="65" width="230" height="120" as="geometry"/></mxCell>
+        <mxCell id="disable" value="禁用 V5&#xa;使用 V4 参数包" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;fontStyle=1;" vertex="1" parent="fallback"><mxGeometry x="1670" y="250" width="230" height="110" as="geometry"/></mxCell>
+        <mxCell id="ok" value="输出 V5&#xa;c=0 像素&#xa;逐位等于 V4" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;" vertex="1" parent="fallback"><mxGeometry x="1900" y="85" width="120" height="100" as="geometry"/></mxCell>
+
+        <mxCell id="validate" value="B. 离线验证闭环（不等同于端侧性能结论）" style="swimlane;startSize=32;horizontal=0;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="50" y="550" width="2050" height="500" as="geometry"/></mxCell>
+        <mxCell id="dataset" value="测试集&#xa;20 组人像 / 运动 / 遮挡 / 复杂背景&#xa;每组只取 3 s、30 fps、90 帧&#xa;锚帧 k=45；离线单帧锚点为 DAv2-Large" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="validate"><mxGeometry x="70" y="70" width="330" height="150" as="geometry"/></mxCell>
+        <mxCell id="run" value="固定流水线&#xa;clip → VDA-S stream → DAv2-Large anchor&#xa;→ SEA-RAFT-S → V4/V5 → 指标 → 可视化&#xa;固定模型版本、权重 hash、配置与随机种子" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" vertex="1" parent="validate"><mxGeometry x="480" y="65" width="380" height="160" as="geometry"/></mxCell>
+        <mxCell id="metrics" value="数值指标（运动补偿后）&#xa;锚帧全图 / 主体 NMAE：V4→V5&#xa;全图 / 主体 temporal P95&#xa;最大新增跳变、平坦区修正梯度 P99&#xa;fallback 数与 Python apply ms/帧" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;" vertex="1" parent="validate"><mxGeometry x="940" y="55" width="360" height="180" as="geometry"/></mxCell>
+        <mxCell id="visual" value="固定值域可视化&#xa;四栏视频：VDA raw | V4 | V5(DAv2) | DAv2 anchor&#xa;同一 P02–P98 显示范围，不逐帧拉伸&#xa;重点检查人物边缘、墙面分层、拖影、尾帧与跳变邻帧" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;" vertex="1" parent="validate"><mxGeometry x="1380" y="50" width="420" height="190" as="geometry"/></mxCell>
+        <mxCell id="gate" value="效果与时序门槛同时通过？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;fontStyle=1;" vertex="1" parent="validate"><mxGeometry x="1880" y="80" width="140" height="130" as="geometry"/></mxCell>
+        <mxCell id="pass" value="通过：进入目标 SoC 实测&#xa;1–2 s 准备时延 / 峰值内存 / 功耗 / 热稳态&#xa;再决定默认启用 V5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;fontStyle=1;" vertex="1" parent="validate"><mxGeometry x="1460" y="300" width="400" height="120" as="geometry"/></mxCell>
+        <mxCell id="fail" value="失败：默认交付 V4&#xa;按场景定位：锚帧拟合 / flow confidence / 上采样边缘阈值 / 量化&#xa;只修改对应模块，保留 V4 基线与可回退版本" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;fontStyle=1;" vertex="1" parent="validate"><mxGeometry x="940" y="295" width="430" height="130" as="geometry"/></mxCell>
+        <mxCell id="limits" value="解释边界&#xa;当前没有真实深度 GT；NMAE 衡量与照片锚点的相对一致性，不能宣称绝对深度精度。&#xa;桌面 CPU 光流耗时不能代表目标手机 SoC；端侧可行性必须以编译后模型和真实系统调度实测。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=13;" vertex="1" parent="validate"><mxGeometry x="70" y="285" width="710" height="140" as="geometry"/></mxCell>
+
+        <mxCell id="d1" value="是" edge="1" parent="1" source="start" target="flowok" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="d2" value="否" edge="1" parent="1" source="flowok" target="wholev4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;strokeColor=#b85450;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="d3" value="是" edge="1" parent="1" source="flowok" target="cut" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="d4" value="是" edge="1" parent="1" source="cut" target="zerocut" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;strokeColor=#b85450;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="d5" value="否" edge="1" parent="1" source="cut" target="corr" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="d6" value="是" edge="1" parent="1" source="corr" target="fade" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;strokeColor=#b85450;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="d7" value="否" edge="1" parent="1" source="corr" target="support" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="d8" value="否" edge="1" parent="1" source="support" target="nodeid" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;strokeColor=#b85450;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="d9" value="是" edge="1" parent="1" source="support" target="serial" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="d10" value="否" edge="1" parent="1" source="serial" target="disable" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;strokeColor=#b85450;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="d11" value="是" edge="1" parent="1" source="serial" target="ok" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="d12" edge="1" parent="1" source="dataset" target="run" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="d13" edge="1" parent="1" source="run" target="metrics" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="d14" edge="1" parent="1" source="metrics" target="visual" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="d15" edge="1" parent="1" source="visual" target="gate" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="d16" value="是" edge="1" parent="1" source="gate" target="pass" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0.75;entryY=1;"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="2080" y="695"/><mxPoint x="2080" y="1000"/><mxPoint x="1760" y="1000"/></Array></mxGeometry></mxCell>
+        <mxCell id="d17" value="否" edge="1" parent="1" source="gate" target="fail" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;strokeColor=#b85450;endArrow=block;endFill=1;exitX=0.25;exitY=1;entryX=0.5;entryY=0;"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1950" y="830"/><mxPoint x="1205" y="830"/></Array></mxGeometry></mxCell>
       </root>
     </mxGraphModel>
   </diagram>
