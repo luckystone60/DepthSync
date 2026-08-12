@@ -24,7 +24,7 @@ class DepthSyncConfig:
 
     algorithm_version: str = "v4"
     depth_mode: str = "disparity"
-    sample_count: int = 2048
+    sample_count: int = 16384
     face_sample_fraction: float = 0.30
     edge_quantile: float = 0.70
     mad_threshold: float = 3.0
@@ -35,8 +35,21 @@ class DepthSyncConfig:
     min_fit_pixels: int = 128
     high_res_interpolation: int = cv2.INTER_LINEAR
     mapping_mode: str = "lut"
-    lut_nodes: int = 16
-    lut_candidate_nodes: tuple[int, ...] = (8, 12, 16)
+    lut_nodes: int = 64
+    lut_candidate_nodes: tuple[int, ...] = (8, 16, 32, 64)
+    lut_quantile_low: float = 0.02
+    lut_quantile_high: float = 0.98
+    lut_distribution_weight: float = 0.50
+    lut_complexity_penalty: float = 0.002
+    lut_min_pair_correlation: float = 0.05
+    lut_temporal_nodes: int = 16
+    lut_distribution_blend: float = 1.0
+    lut_distribution_clip_fraction: float = 0.15
+    lut_frame_min_pair_correlation: float = 0.80
+    lut_frame_force_jump_threshold: float = 0.10
+    invalid_floor_quantile: float = 0.10
+    invalid_floor_fraction: float = 0.03
+    invalid_floor_tolerance_fraction: float = 0.002
     residual_grid_shape: tuple[int, int] = (9, 16)
     static_grid_shape: tuple[int, int] = (72, 128)
     static_target_shape: tuple[int, int] = (72, 128)
@@ -46,6 +59,8 @@ class DepthSyncConfig:
     anchor_transition_radius: int = 6
     lut_max_scale_delta: float = 0.01
     lut_max_offset_delta_fraction: float = 0.005
+    enable_lut_distribution_stabilization: bool = True
+    enable_lut_temporal_adjustment: bool = False
     residual_motion_strength: float = 1.0
     static_motion_threshold: float = 0.0025
     static_motion_softness: float = 0.0005
@@ -328,18 +343,9 @@ def robust_monotonic_lut_samples(
     if x.size < cfg.min_fit_pixels or np.std(x) < cfg.eps:
         return np.array([0.0, 1.0], np.float32), np.array([0.0, 1.0], np.float32), 0.0
 
-    # Remove gross mismatches using the same robust affine initializer as V1.
-    affine_a, affine_b, _ = robust_affine_samples(x, y, w, cfg)
-    residual = y - (affine_a * x + affine_b)
-    center = float(np.median(residual))
-    sigma = 1.4826 * float(np.median(np.abs(residual - center))) + cfg.eps
-    inlier = np.abs(residual - center) <= cfg.mad_threshold * sigma
-    x, y, w = x[inlier], y[inlier], w[inlier]
-    if x.size < cfg.min_fit_pixels:
-        lo, hi = np.quantile(source[good], (0.1, 0.9))
-        lut_x = np.array([lo, hi], np.float32)
-        return lut_x, (affine_a * lut_x + affine_b).astype(np.float32), 0.0
-
+    # Do not pre-filter with an affine residual.  The purpose of this fit is to
+    # represent strongly non-linear model-to-model mappings; an affine gate can
+    # reject precisely the samples that justify a LUT (scene 12 regression).
     order = np.argsort(x)
     groups = [group for group in np.array_split(order, min(cfg.lut_nodes, len(order))) if len(group)]
     lut_x = np.array([_weighted_median(x[group], w[group]) for group in groups], np.float32)
@@ -357,6 +363,174 @@ def robust_monotonic_lut_samples(
     coverage = min(1.0, float(x.size) / max(cfg.min_fit_pixels * 2, 1))
     confidence = float(np.clip(residual_score * coverage * np.mean(np.clip(w, 0.0, 1.0)), 0.0, 1.0))
     return lut_x, lut_y, confidence
+
+
+def _robust_value_mask(values: np.ndarray, cfg: DepthSyncConfig) -> np.ndarray:
+    """Return fit-valid values, excluding a dominant invalid-floor plateau."""
+    array = np.asarray(values, dtype=np.float32)
+    finite = np.isfinite(array)
+    samples = array[finite]
+    if samples.size < cfg.min_fit_pixels:
+        return finite
+    low, high = np.quantile(
+        samples, (cfg.lut_quantile_low, cfg.lut_quantile_high)
+    )
+    robust_range = max(float(high - low), cfg.eps)
+    floor = float(np.quantile(samples, cfg.invalid_floor_quantile))
+    tolerance = max(
+        cfg.invalid_floor_tolerance_fraction * robust_range,
+        16.0 * cfg.eps,
+    )
+    plateau = np.abs(samples - floor) <= tolerance
+    above = samples > floor + tolerance
+    if (
+        float(np.mean(plateau)) >= cfg.invalid_floor_fraction
+        and int(np.count_nonzero(above)) >= cfg.min_fit_pixels
+    ):
+        finite &= array > floor + tolerance
+    return finite
+
+
+def _rank_correlation(x: np.ndarray, y: np.ndarray, eps: float) -> float:
+    """Deterministic Spearman-like correlation without a scipy dependency."""
+    if x.size < 2 or np.std(x) <= eps or np.std(y) <= eps:
+        return 0.0
+    rx = np.empty(x.size, np.float64)
+    ry = np.empty(y.size, np.float64)
+    rx[np.argsort(x, kind="mergesort")] = np.arange(x.size, dtype=np.float64)
+    ry[np.argsort(y, kind="mergesort")] = np.arange(y.size, dtype=np.float64)
+    value = float(np.corrcoef(rx, ry)[0, 1])
+    return value if np.isfinite(value) else 0.0
+
+
+def quantile_monotonic_lut(
+    source: np.ndarray,
+    target: np.ndarray,
+    nodes: int,
+    cfg: DepthSyncConfig,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Fit a correspondence-free monotonic LUT from matched quantiles."""
+    source_values = np.asarray(source, dtype=np.float32)
+    target_values = np.asarray(target, dtype=np.float32)
+    source_values = source_values[_robust_value_mask(source_values, cfg)]
+    target_values = target_values[_robust_value_mask(target_values, cfg)]
+    if min(source_values.size, target_values.size) < cfg.min_fit_pixels:
+        return (
+            np.array([0.0, 1.0], np.float32),
+            np.array([0.0, 1.0], np.float32),
+            0.0,
+        )
+    quantiles = np.linspace(
+        cfg.lut_quantile_low,
+        cfg.lut_quantile_high,
+        max(int(nodes), 2),
+        dtype=np.float64,
+    )
+    lut_x = np.quantile(source_values, quantiles).astype(np.float32)
+    lut_y = np.quantile(target_values, quantiles).astype(np.float32)
+    keep = np.concatenate(([True], np.diff(lut_x) > cfg.eps))
+    lut_x, lut_y = lut_x[keep], lut_y[keep]
+    if len(lut_x) < 2:
+        return (
+            np.array([0.0, 1.0], np.float32),
+            np.array([0.0, 1.0], np.float32),
+            0.0,
+        )
+    lut_y = _isotonic_increasing(lut_y, np.ones_like(lut_y))
+    return lut_x, lut_y, 1.0
+
+
+def _stabilized_frame_lut(
+    frame: np.ndarray,
+    anchor: np.ndarray,
+    anchor_lut_x: np.ndarray,
+    anchor_lut_y: np.ndarray,
+    cfg: DepthSyncConfig,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Compose frame→anchor quantiles with the anchor→photo mapping."""
+    frame_x, anchor_values, confidence = quantile_monotonic_lut(
+        frame, anchor, min(cfg.lut_temporal_nodes, cfg.lut_nodes), cfg
+    )
+    if confidence <= 0 or len(frame_x) < 2:
+        return anchor_lut_x.copy(), anchor_lut_y.copy(), 0.0
+    mapped_y = _apply_lut(
+        anchor_values, anchor_lut_x, anchor_lut_y, cfg.eps
+    )
+    base_y = _apply_lut(frame_x, anchor_lut_x, anchor_lut_y, cfg.eps)
+    anchor_target = _apply_lut(anchor, anchor_lut_x, anchor_lut_y, cfg.eps)
+    valid_target = anchor_target[np.isfinite(anchor_target)]
+    target_range = (
+        float(np.quantile(valid_target, 0.9) - np.quantile(valid_target, 0.1))
+        if valid_target.size
+        else 1.0
+    )
+    correction_limit = cfg.lut_distribution_clip_fraction * max(
+        target_range, cfg.eps
+    )
+    correction = np.clip(mapped_y - base_y, -correction_limit, correction_limit)
+    blended_y = base_y + np.clip(cfg.lut_distribution_blend, 0.0, 1.0) * correction
+    return (*_canonical_lut(frame_x, blended_y, cfg.lut_nodes, cfg.eps), confidence)
+
+
+def _mapping_score(
+    source_image: np.ndarray,
+    target_image: np.ndarray,
+    lut_x: np.ndarray,
+    lut_y: np.ndarray,
+    cfg: DepthSyncConfig,
+    paired: bool,
+) -> float:
+    """Score paired accuracy and independent output-distribution alignment."""
+    source_valid = _robust_value_mask(source_image, cfg)
+    target_valid = _robust_value_mask(target_image, cfg)
+    if min(int(np.count_nonzero(source_valid)), int(np.count_nonzero(target_valid))) < cfg.min_fit_pixels:
+        return float("inf")
+    prediction = _apply_lut(source_image, lut_x, lut_y, cfg.eps)
+    target_values = target_image[target_valid]
+    target_range = max(
+        float(np.quantile(target_values, 0.9) - np.quantile(target_values, 0.1)),
+        cfg.eps,
+    )
+    quantiles = np.asarray([0.1, 0.25, 0.5, 0.75, 0.9])
+    distribution_error = float(
+        np.mean(
+            np.abs(
+                np.quantile(prediction[source_valid], quantiles)
+                - np.quantile(target_values, quantiles)
+            )
+        )
+        / target_range
+    )
+    paired_error = 0.0
+    if paired:
+        valid_pair = source_valid & target_valid & np.isfinite(prediction)
+        if int(np.count_nonzero(valid_pair)) < cfg.min_fit_pixels:
+            return float("inf")
+        paired_error = float(
+            np.median(np.abs(prediction[valid_pair] - target_image[valid_pair]))
+            / target_range
+        )
+    return paired_error + cfg.lut_distribution_weight * distribution_error
+
+
+def _sequence_distribution_jump(
+    frames: Sequence[np.ndarray], cfg: DepthSyncConfig
+) -> float:
+    """P95 adjacent-frame quantile jump used to detect genuine model flicker."""
+    quantiles = np.linspace(0.1, 0.9, 9)
+    curves: list[np.ndarray] = []
+    for frame in frames:
+        values = np.asarray(frame, np.float32)
+        values = values[_robust_value_mask(values, cfg)]
+        if values.size < cfg.min_fit_pixels:
+            continue
+        curve = np.quantile(values, quantiles)
+        scale = max(float(curve[-1] - curve[0]), cfg.eps)
+        curves.append(((curve - curve[0]) / scale).astype(np.float32))
+    if len(curves) < 2:
+        return 0.0
+    jumps = np.mean(np.abs(np.diff(np.asarray(curves), axis=0)), axis=1)
+    return float(np.quantile(jumps, 0.95))
 
 
 def _bilinear_sample(image: np.ndarray, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
@@ -1077,8 +1251,24 @@ class DepthSync:
         a, b, affine_confidence = robust_affine_samples(anchor_source, anchor_target, None, cfg)
         anchor_lut_x, anchor_lut_y = _affine_lut(anchor_source, a, b, cfg)
         confidence = affine_confidence
+        pair_correlation = 0.0
         if cfg.mapping_mode == "lut":
-            best_score = float("inf")
+            best_score = _mapping_score(
+                raw[anchor_index],
+                photo,
+                anchor_lut_x,
+                anchor_lut_y,
+                cfg,
+                paired=True,
+            )
+            source_fit_valid = _robust_value_mask(anchor_source, cfg)
+            target_fit_valid = _robust_value_mask(anchor_target, cfg)
+            paired_fit_valid = source_fit_valid & target_fit_valid
+            pair_correlation = _rank_correlation(
+                anchor_source[paired_fit_valid],
+                anchor_target[paired_fit_valid],
+                cfg.eps,
+            )
             candidate_counts = tuple(
                 sorted(
                     {
@@ -1088,87 +1278,93 @@ class DepthSync:
                     }
                 )
             ) or (cfg.lut_nodes,)
-            for candidate_nodes in candidate_counts:
-                candidate_cfg = replace(cfg, lut_nodes=candidate_nodes)
-                candidate_x, candidate_y, lut_confidence = (
-                    robust_monotonic_lut_samples(
-                        anchor_source,
-                        anchor_target,
-                        None,
-                        candidate_cfg,
-                    )
-                )
-                if lut_confidence <= 0:
-                    continue
-                canonical_x, canonical_y = _canonical_lut(
-                    candidate_x,
-                    candidate_y,
-                    cfg.lut_nodes,
-                    cfg.eps,
-                )
-                prediction = _apply_lut(
-                    raw[anchor_index],
-                    canonical_x,
-                    canonical_y,
-                    cfg.eps,
-                )
-                valid = np.isfinite(prediction) & np.isfinite(photo)
-                if not np.any(valid):
-                    continue
-                score_prediction = prediction
-                face_valid = np.zeros(shape, bool)
-                if face_box is not None:
-                    x0, y0, x1, y1 = face_box
-                    face_valid[
-                        max(int(y0 * shape[0]), 0) : min(
-                            int(np.ceil(y1 * shape[0])),
-                            shape[0],
-                        ),
-                        max(int(x0 * shape[1]), 0) : min(
-                            int(np.ceil(x1 * shape[1])),
-                            shape[1],
-                        ),
-                    ] = True
-                    face_valid &= valid
-                    if (
-                        np.any(face_valid)
-                        and cfg.subject_offset_clip_fraction > 0
-                    ):
-                        limit = (
-                            cfg.subject_offset_clip_fraction
-                            * max(photo_range, cfg.eps)
+            if pair_correlation >= cfg.lut_min_pair_correlation:
+                paired_source = anchor_source[paired_fit_valid]
+                paired_target = anchor_target[paired_fit_valid]
+                for candidate_nodes in candidate_counts:
+                    candidate_cfg = replace(cfg, lut_nodes=candidate_nodes)
+                    candidate_x, candidate_y, lut_confidence = (
+                        robust_monotonic_lut_samples(
+                            paired_source,
+                            paired_target,
+                            None,
+                            candidate_cfg,
                         )
-                        subject_delta = float(
-                            np.clip(
-                                np.median(
-                                    photo[face_valid]
-                                    - prediction[face_valid]
-                                ),
-                                -limit,
-                                limit,
-                            )
-                        )
-                        score_prediction = prediction + subject_delta
-                score = float(
-                    np.median(
-                        np.abs(score_prediction[valid] - photo[valid])
                     )
-                    / max(photo_range, cfg.eps)
-                )
-                if np.any(face_valid):
-                    score += float(
-                        np.median(
-                            np.abs(
-                                score_prediction[face_valid]
-                                - photo[face_valid]
-                            )
-                        )
-                        / max(photo_range, cfg.eps)
+                    if lut_confidence <= 0:
+                        continue
+                    canonical_x, canonical_y = _canonical_lut(
+                        candidate_x,
+                        candidate_y,
+                        cfg.lut_nodes,
+                        cfg.eps,
                     )
-                if score < best_score:
-                    best_score = score
-                    anchor_lut_x, anchor_lut_y = canonical_x, canonical_y
-                    confidence = lut_confidence
+                    score = _mapping_score(
+                        raw[anchor_index],
+                        photo,
+                        canonical_x,
+                        canonical_y,
+                        cfg,
+                        paired=True,
+                    ) + cfg.lut_complexity_penalty * (
+                        candidate_nodes / max(cfg.lut_nodes, 1)
+                    )
+                    if score < best_score:
+                        best_score = score
+                        anchor_lut_x, anchor_lut_y = canonical_x, canonical_y
+                        confidence = lut_confidence
+
+            # Correspondence-free distribution mapping is the mandatory
+            # fallback when aligned pixels are contradictory or insufficient.
+            # It guarantees a globally useful value domain for revealed areas
+            # instead of silently returning an identity LUT.
+            raw_score = _mapping_score(
+                raw[anchor_index],
+                photo,
+                np.asarray([0.0, 1.0], np.float32),
+                np.asarray([0.0, 1.0], np.float32),
+                cfg,
+                paired=False,
+            )
+            if not np.isfinite(best_score) or pair_correlation < cfg.lut_min_pair_correlation:
+                quantile_best = float("inf")
+                quantile_best_x: np.ndarray | None = None
+                quantile_best_y: np.ndarray | None = None
+                quantile_best_confidence = 0.0
+                for candidate_nodes in candidate_counts:
+                    candidate_x, candidate_y, quantile_confidence = (
+                        quantile_monotonic_lut(
+                            raw[anchor_index], photo, candidate_nodes, cfg
+                        )
+                    )
+                    if quantile_confidence <= 0:
+                        continue
+                    canonical_x, canonical_y = _canonical_lut(
+                        candidate_x,
+                        candidate_y,
+                        cfg.lut_nodes,
+                        cfg.eps,
+                    )
+                    score = _mapping_score(
+                        raw[anchor_index],
+                        photo,
+                        canonical_x,
+                        canonical_y,
+                        cfg,
+                        paired=False,
+                    ) + cfg.lut_complexity_penalty * (
+                        candidate_nodes / max(cfg.lut_nodes, 1)
+                    )
+                    if score < quantile_best:
+                        quantile_best = score
+                        quantile_best_x, quantile_best_y = canonical_x, canonical_y
+                        quantile_best_confidence = quantile_confidence
+                if np.isfinite(quantile_best) and quantile_best < raw_score:
+                    best_score = quantile_best
+                    assert quantile_best_x is not None and quantile_best_y is not None
+                    anchor_lut_x, anchor_lut_y = quantile_best_x, quantile_best_y
+                    confidence = quantile_best_confidence
+                    reasons[anchor_index] = "anchor_quantile_fallback"
         if confidence <= 0:
             reasons[anchor_index] = "insufficient_anchor_support"
         if cfg.mapping_mode == "lut":
@@ -1181,9 +1377,87 @@ class DepthSync:
             base_outputs[anchor_index] = _apply_lut(raw[anchor_index], anchor_lut_x, anchor_lut_y, cfg.eps)
         else:
             base_outputs[anchor_index] = (a * raw[anchor_index] + b).astype(np.float32)
+        sequence_distribution_jump = (
+            _sequence_distribution_jump(raw, cfg)
+            if cfg.algorithm_version == "v4"
+            and cfg.mapping_mode == "lut"
+            and cfg.enable_lut_distribution_stabilization
+            else 0.0
+        )
+        strong_distribution_flicker = (
+            sequence_distribution_jump >= cfg.lut_frame_force_jump_threshold
+        )
+        stabilize_frame_distribution = (
+            cfg.algorithm_version == "v4"
+            and cfg.mapping_mode == "lut"
+            and cfg.enable_lut_distribution_stabilization
+            and (
+                pair_correlation >= cfg.lut_frame_min_pair_correlation
+                or strong_distribution_flicker
+            )
+        )
+        frame_lut_cfg = (
+            replace(
+                cfg,
+                lut_temporal_nodes=cfg.lut_nodes,
+                lut_distribution_clip_fraction=1.0e6,
+            )
+            if strong_distribution_flicker
+            else cfg
+        )
         for direction in (-1, 1):
             previous_index = anchor_index
             for i in range(anchor_index + direction, -1 if direction < 0 else n, direction):
+                if (
+                    cfg.algorithm_version == "v4"
+                    and cfg.mapping_mode == "lut"
+                    and cfg.enable_lut_distribution_stabilization
+                    and stabilize_frame_distribution
+                ):
+                    current_x, current_y, frame_confidence = _stabilized_frame_lut(
+                        raw[i],
+                        raw[anchor_index],
+                        anchor_lut_x,
+                        anchor_lut_y,
+                        frame_lut_cfg,
+                    )
+                    # Keep the photo anchor exact and unlock distribution
+                    # compensation gradually.  This is computed offline and
+                    # prevents an anchor→next-frame mapping discontinuity.
+                    distance = abs(i - anchor_index)
+                    transition = float(
+                        np.clip(
+                            distance / max(cfg.anchor_transition_radius, 1),
+                            0.0,
+                            1.0,
+                        )
+                    )
+                    anchor_y_at_current_x = _apply_lut(
+                        current_x, anchor_lut_x, anchor_lut_y, cfg.eps
+                    )
+                    current_y = (
+                        (1.0 - transition) * anchor_y_at_current_x
+                        + transition * current_y
+                    ).astype(np.float32)
+                    scales[i], offsets[i] = 1.0, 0.0
+                    confidences[i] = frame_confidence
+                    lut_x[i], lut_y[i] = current_x, current_y
+                    base_outputs[i] = _apply_lut(
+                        raw[i], current_x, current_y, cfg.eps
+                    )
+                    if frame_confidence <= 0:
+                        reasons[i] = "insufficient_distribution_support"
+                    previous_index = i
+                    continue
+                if cfg.mapping_mode == "lut" and not cfg.enable_lut_temporal_adjustment:
+                    scales[i], offsets[i] = 1.0, 0.0
+                    confidences[i] = confidence
+                    lut_x[i], lut_y[i] = anchor_lut_x, anchor_lut_y
+                    base_outputs[i] = _apply_lut(
+                        raw[i], anchor_lut_x, anchor_lut_y, cfg.eps
+                    )
+                    previous_index = i
+                    continue
                 # Global mapping propagates against the previous base map. The
                 # spatial photo residual travels separately to avoid double use.
                 previous = base_outputs[previous_index]

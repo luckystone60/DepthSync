@@ -144,8 +144,51 @@ def render_scene(
 
     raw = np.load(depth_dir / "video_disparity.npz")["disparity"].astype(np.float32)
     v4 = np.load(result_root / scene / "v4_depth.npz")["disparity"].astype(np.float32)
-    v5 = np.load(result_root / scene / "v5_depth.npz")["disparity"].astype(np.float32)
-    fields = np.load(result_root / scene / "v5_parameters.npz")
+    v5_path = result_root / scene / "v5_depth.npz"
+    v5 = np.load(v5_path)["disparity"].astype(np.float32) if v5_path.is_file() else None
+    fields = np.load(result_root / scene / "v5_parameters.npz") if v5 is not None else None
+    if v5 is None:
+        photo = load_anchor_disparity(depth_dir, anchor_model)
+        manifest = json.loads((clip_dir / "manifest.json").read_text(encoding="utf-8"))
+        metrics = json.loads((result_root / scene / "metrics.json").read_text(encoding="utf-8"))
+        anchor = int(manifest["anchor_index"])
+        fps = float(manifest["target_fps"])
+        photo_low = cv2.resize(photo, (raw.shape[2], raw.shape[1]), interpolation=cv2.INTER_AREA)
+        photo_limits = robust_limits(photo_low)
+        panel_size = (320, 180)
+        photo_color = colorize_depth(photo_low, photo_limits)
+        comparison_name = "depth_comparison_dav2_v4.mp4"
+        comparison_path = output_dir / comparison_name
+        comparison_size = (panel_size[0] * 3, panel_size[1] + 48)
+        writer = cv2.VideoWriter(
+            str(comparison_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, comparison_size
+        )
+        if not writer.isOpened():
+            raise ValueError(f"Cannot create video: {comparison_path}")
+        for index in range(len(raw)):
+            writer.write(
+                np.hstack(
+                    [
+                        _panel(colorize_depth(raw[index], photo_limits), f"VDA raw / frame {index:02d}", panel_size, photo_limits),
+                        _panel(colorize_depth(v4[index], photo_limits), "V4.1 adaptive global LUT", panel_size, photo_limits),
+                        _panel(photo_color, "DAv2-Large photo anchor", panel_size, photo_limits),
+                    ]
+                )
+            )
+        writer.release()
+        metadata = {
+            "scene": scene,
+            "anchor_model": anchor_model,
+            "frame_count": len(raw),
+            "fps": fps,
+            "anchor_index": anchor,
+            "shared_limits_p02_p98": photo_limits,
+            "files": {"comparison_video": comparison_name},
+        }
+        (output_dir / "visualization.json").write_text(
+            json.dumps(metadata, indent=2), encoding="utf-8"
+        )
+        return metadata
     delta_scale = fields["delta_scale"].astype(np.float32)
     offset_norm = fields["offset_norm"].astype(np.float32)
     field_confidence = fields["confidence"].astype(np.float32)

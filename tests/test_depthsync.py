@@ -50,10 +50,10 @@ class DepthSyncTest(unittest.TestCase):
         self.assertEqual(len(result.fallback_reasons), t)
         self.assertEqual(result.scales[1], result.scales[2])
         self.assertEqual(result.scales[3], result.scales[2])
-        self.assertEqual(result.fallback_reasons[1], "anchor_lock")
-        self.assertEqual(result.fallback_reasons[3], "anchor_lock")
+        self.assertEqual(result.fallback_reasons[1], "")
+        self.assertEqual(result.fallback_reasons[3], "")
         self.assertEqual(result.region_labels.size, 0)
-        self.assertEqual(result.lut_x.shape[1], 16)
+        self.assertEqual(result.lut_x.shape[1], 64)
 
     def test_v3_improves_nonlinear_and_spatial_anchor_alignment(self):
         t, h, w, anchor = 7, 54, 80, 3
@@ -232,6 +232,86 @@ class DepthSyncTest(unittest.TestCase):
             errors[(8, 16)],
             min(errors[(8,)], errors[(16,)]) + 1e-6,
         )
+
+    def test_v41_recovers_large_nonlinear_range_with_invalid_floor(self):
+        """A DAv2-like range mismatch must not silently become identity."""
+        h, w = 72, 128
+        yy, xx = np.mgrid[:h, :w].astype(np.float32)
+        source = 18.0 * (0.75 * xx / (w - 1) + 0.25 * yy / (h - 1))
+        source[:26] = 0.0  # Model invalid-floor plateau, as seen in scene 12.
+        photo = 8.0 + 4.0 * source + 1.15 * source**2
+        photo[:26] = 0.0
+        video = np.stack([source - 0.02, source, source + 0.02])
+        result = DepthSync(
+            DepthSyncConfig(
+                algorithm_version="v4",
+                lut_nodes=64,
+                lut_candidate_nodes=(8, 16, 32, 64),
+                sample_count=16384,
+                subject_offset_clip_fraction=0.0,
+            )
+        ).offline_prepare(video, photo, 1)
+        valid = source > 0.0
+        raw_error = float(np.median(np.abs(source[valid] - photo[valid])))
+        mapped_error = float(
+            np.median(np.abs(result.depths[1][valid] - photo[valid]))
+        )
+        self.assertLess(mapped_error, raw_error * 0.08)
+        self.assertGreater(float(result.lut_y[1, -1]), 200.0)
+        self.assertGreater(float(result.confidences[1]), 0.0)
+        self.assertNotEqual(result.fallback_reasons[1], "insufficient_anchor_support")
+
+    def test_v41_quantile_fallback_aligns_distribution_when_pairs_are_wrong(self):
+        """Global range still aligns when spatial pairing is unreliable."""
+        h, w = 64, 96
+        source = np.tile(np.linspace(0.2, 10.0, w, dtype=np.float32), (h, 1))
+        target_distribution = 20.0 + 3.0 * source + 0.8 * source**2
+        photo = np.flip(target_distribution, axis=1).copy()  # Deliberately wrong pairs.
+        video = np.stack([source, source, source])
+        result = DepthSync(
+            DepthSyncConfig(
+                algorithm_version="v4",
+                lut_nodes=64,
+                lut_candidate_nodes=(8, 16, 32, 64),
+                sample_count=16384,
+                subject_offset_clip_fraction=0.0,
+            )
+        ).offline_prepare(video, photo, 1)
+        before = np.quantile(source, [0.1, 0.5, 0.9])
+        after = np.quantile(result.depths[1], [0.1, 0.5, 0.9])
+        target = np.quantile(photo, [0.1, 0.5, 0.9])
+        self.assertLess(float(np.mean(np.abs(after - target))), float(np.mean(np.abs(before - target))) * 0.1)
+        self.assertTrue(np.all(np.diff(result.lut_y[1]) >= -1e-6))
+
+    def test_v41_distribution_stabilization_reduces_global_scale_drift(self):
+        h, w, t, anchor = 48, 80, 9, 4
+        base = np.tile(np.linspace(0.2, 8.0, w, dtype=np.float32), (h, 1))
+        scales = np.linspace(0.7, 1.3, t, dtype=np.float32)
+        video = np.stack([base * scale for scale in scales])
+        photo = 10.0 + 5.0 * base + base**2
+        config = dict(
+            algorithm_version="v4",
+            lut_nodes=64,
+            lut_candidate_nodes=(8, 16, 32, 64),
+            sample_count=16384,
+            subject_offset_clip_fraction=0.0,
+        )
+        fixed = DepthSync(
+            DepthSyncConfig(
+                **config,
+                enable_lut_distribution_stabilization=False,
+            )
+        ).offline_prepare(video, photo, anchor)
+        stabilized = DepthSync(DepthSyncConfig(**config)).offline_prepare(
+            video, photo, anchor
+        )
+        fixed_medians = np.median(fixed.depths, axis=(1, 2))
+        stabilized_medians = np.median(stabilized.depths, axis=(1, 2))
+        self.assertLess(
+            float(np.ptp(stabilized_medians)),
+            float(np.ptp(fixed_medians)) * 0.55,
+        )
+        self.assertTrue(np.all(stabilized.confidences > 0.0))
 
     def test_isolated_static_confidence_hole_is_filled(self):
         t, h, w = 7, 30, 40

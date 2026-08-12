@@ -43,7 +43,10 @@ def _track(source: np.ndarray, target: np.ndarray, points: np.ndarray) -> tuple[
         return np.zeros_like(points), np.zeros(len(points), np.float32)
     displacement = tracked - points
     status = status.reshape(-1).astype(np.float32)
-    error = np.nan_to_num(error.reshape(-1), nan=255.0, posinf=255.0)
+    error = np.nan_to_num(
+        error.reshape(-1), nan=255.0, posinf=255.0, neginf=255.0
+    )
+    error = np.clip(error, 0.0, 255.0)
     confidence = status * np.exp(-error / 24.0)
     return displacement, confidence.astype(np.float32)
 
