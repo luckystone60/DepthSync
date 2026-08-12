@@ -155,6 +155,7 @@ def render_scene(
         fps = float(manifest["target_fps"])
         photo_low = cv2.resize(photo, (raw.shape[2], raw.shape[1]), interpolation=cv2.INTER_AREA)
         photo_limits = robust_limits(photo_low)
+        raw_limits = robust_limits(raw)
         panel_size = (320, 180)
         photo_color = colorize_depth(photo_low, photo_limits)
         comparison_name = "depth_comparison_dav2_v4.mp4"
@@ -169,7 +170,12 @@ def render_scene(
             writer.write(
                 np.hstack(
                     [
-                        _panel(colorize_depth(raw[index], photo_limits), f"VDA raw / frame {index:02d}", panel_size, photo_limits),
+                        _panel(
+                            colorize_depth(raw[index], raw_limits),
+                            f"VDA normalized / frame {index:02d}",
+                            panel_size,
+                            raw_limits,
+                        ),
                         _panel(colorize_depth(v4[index], photo_limits), "V4.1 adaptive global LUT", panel_size, photo_limits),
                         _panel(photo_color, "DAv2-Large photo anchor", panel_size, photo_limits),
                     ]
@@ -183,6 +189,7 @@ def render_scene(
             "fps": fps,
             "anchor_index": anchor,
             "shared_limits_p02_p98": photo_limits,
+            "vda_sequence_limits_p02_p98": raw_limits,
             "files": {"comparison_video": comparison_name},
         }
         (output_dir / "visualization.json").write_text(

@@ -47,6 +47,7 @@ class DepthSyncConfig:
     lut_distribution_clip_fraction: float = 0.15
     lut_frame_min_pair_correlation: float = 0.80
     lut_frame_force_jump_threshold: float = 0.10
+    lut_frame_freeze_jump_threshold: float = 0.05
     invalid_floor_quantile: float = 0.10
     invalid_floor_fraction: float = 0.03
     invalid_floor_tolerance_fraction: float = 0.002
@@ -531,6 +532,23 @@ def _sequence_distribution_jump(
         return 0.0
     jumps = np.mean(np.abs(np.diff(np.asarray(curves), axis=0)), axis=1)
     return float(np.quantile(jumps, 0.95))
+
+
+def _adjacent_distribution_jump(
+    first: np.ndarray, second: np.ndarray, cfg: DepthSyncConfig
+) -> float:
+    """Quantile-shape distance invariant to global depth scale and shift."""
+    curves: list[np.ndarray] = []
+    quantiles = np.linspace(0.1, 0.9, 9)
+    for frame in (first, second):
+        values = np.asarray(frame, np.float32)
+        values = values[_robust_value_mask(values, cfg)]
+        if values.size < cfg.min_fit_pixels:
+            return float("inf")
+        curve = np.quantile(values, quantiles)
+        scale = max(float(curve[-1] - curve[0]), cfg.eps)
+        curves.append((curve - curve[0]) / scale)
+    return float(np.mean(np.abs(curves[1] - curves[0])))
 
 
 def _bilinear_sample(image: np.ndarray, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
@@ -1414,6 +1432,23 @@ class DepthSync:
                     and cfg.enable_lut_distribution_stabilization
                     and stabilize_frame_distribution
                 ):
+                    if (
+                        strong_distribution_flicker
+                        and _adjacent_distribution_jump(
+                            raw[i], raw[previous_index], cfg
+                        )
+                        >= cfg.lut_frame_freeze_jump_threshold
+                    ):
+                        scales[i], offsets[i] = 1.0, 0.0
+                        confidences[i] = 0.0
+                        lut_x[i] = lut_x[previous_index]
+                        lut_y[i] = lut_y[previous_index]
+                        base_outputs[i] = _apply_lut(
+                            raw[i], lut_x[i], lut_y[i], cfg.eps
+                        )
+                        reasons[i] = "distribution_change_freeze"
+                        previous_index = i
+                        continue
                     current_x, current_y, frame_confidence = _stabilized_frame_lut(
                         raw[i],
                         raw[anchor_index],

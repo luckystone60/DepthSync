@@ -15,6 +15,20 @@ from depthsync.depth_visualization import colorize_depth, depth_to_gray16, norma
 
 
 class DepthSyncTest(unittest.TestCase):
+    def test_distribution_jump_ignores_scale_but_detects_occlusion(self):
+        from depthsync.core import _adjacent_distribution_jump
+
+        cfg = DepthSyncConfig(min_fit_pixels=32)
+        base = np.tile(np.linspace(0.2, 8.0, 80, dtype=np.float32), (48, 1))
+        scaled = base * 2.5 + 7.0
+        occluded = base.copy()
+        occluded[:, :52] = 30.0
+        self.assertLess(_adjacent_distribution_jump(base, scaled, cfg), 1e-5)
+        self.assertGreater(
+            _adjacent_distribution_jump(base, occluded, cfg),
+            cfg.lut_frame_freeze_jump_threshold,
+        )
+
     def test_anchor_scale_and_temporal_jump_are_improved(self):
         h, w, t, anchor = 72, 96, 7, 3
         yy, xx = np.mgrid[:h, :w].astype(np.float32)
