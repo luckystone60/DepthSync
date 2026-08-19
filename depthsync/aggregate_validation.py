@@ -35,14 +35,13 @@ def aggregate_validation(result_root: Path | str, manifest_path: Path | str) -> 
             continue
         try:
             metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+            raw = float(metrics["raw_anchor_nmae"])
             v4 = float(metrics["v4_anchor_nmae"])
-            v5 = float(metrics["v5_anchor_nmae"])
             item = {
                 "scene": scene,
                 "tags": row["tags"],
-                "anchor_improvement": v4 - v5,
-                "subject_anchor_improvement": float(metrics["v4_subject_anchor_nmae"]) - float(metrics["v5_subject_anchor_nmae"]),
-                "temporal_regression": float(metrics["v5_temporal_p95"]) - float(metrics["v4_temporal_p95"]),
+                "anchor_improvement": raw - v4,
+                "temporal_regression": float(metrics["v4_temporal_p95"]) - float(metrics["v1_temporal_p95"]),
                 "fallback_frames": int(metrics.get("v4_fallback_frames", 0)),
             }
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):

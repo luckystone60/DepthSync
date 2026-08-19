@@ -18,7 +18,7 @@ def select_inspection_frames(
     worst_jump_frame: int,
     configured: list[int] | None,
 ) -> list[int]:
-    """Return deterministic, valid frames for subjective V5 inspection."""
+    """Return deterministic, valid frames for subjective V4.1 inspection."""
     if configured is not None:
         requested = configured
     elif scene == "02":
@@ -133,8 +133,6 @@ def render_scene(
     clip_root: Path,
     depth_root: Path,
     result_root: Path,
-    flow_root: Path = Path("artifacts/flow"),
-    validation_config: Path = Path("config/validation-scenes.json"),
     anchor_model: str = "dav2-large",
 ) -> dict[str, object]:
     clip_dir = clip_root / scene
@@ -144,118 +142,29 @@ def render_scene(
 
     raw = np.load(depth_dir / "video_disparity.npz")["disparity"].astype(np.float32)
     v4 = np.load(result_root / scene / "v4_depth.npz")["disparity"].astype(np.float32)
-    v5_path = result_root / scene / "v5_depth.npz"
-    v5 = np.load(v5_path)["disparity"].astype(np.float32) if v5_path.is_file() else None
-    fields = np.load(result_root / scene / "v5_parameters.npz") if v5 is not None else None
-    if v5 is None:
-        photo = load_anchor_disparity(depth_dir, anchor_model)
-        manifest = json.loads((clip_dir / "manifest.json").read_text(encoding="utf-8"))
-        metrics = json.loads((result_root / scene / "metrics.json").read_text(encoding="utf-8"))
-        anchor = int(manifest["anchor_index"])
-        fps = float(manifest["target_fps"])
-        photo_low = cv2.resize(photo, (raw.shape[2], raw.shape[1]), interpolation=cv2.INTER_AREA)
-        photo_limits = robust_limits(photo_low)
-        raw_limits = robust_limits(raw)
-        panel_size = (320, 180)
-        photo_color = colorize_depth(photo_low, photo_limits)
-        comparison_name = "depth_comparison_dav2_v4.mp4"
-        comparison_path = output_dir / comparison_name
-        comparison_size = (panel_size[0] * 3, panel_size[1] + 48)
-        writer = cv2.VideoWriter(
-            str(comparison_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, comparison_size
-        )
-        if not writer.isOpened():
-            raise ValueError(f"Cannot create video: {comparison_path}")
-        for index in range(len(raw)):
-            writer.write(
-                np.hstack(
-                    [
-                        _panel(
-                            colorize_depth(raw[index], raw_limits),
-                            f"VDA normalized / frame {index:02d}",
-                            panel_size,
-                            raw_limits,
-                        ),
-                        _panel(colorize_depth(v4[index], photo_limits), "V4.1 adaptive global LUT", panel_size, photo_limits),
-                        _panel(photo_color, "DAv2-Large photo anchor", panel_size, photo_limits),
-                    ]
-                )
-            )
-        writer.release()
-        metadata = {
-            "scene": scene,
-            "anchor_model": anchor_model,
-            "frame_count": len(raw),
-            "fps": fps,
-            "anchor_index": anchor,
-            "shared_limits_p02_p98": photo_limits,
-            "vda_sequence_limits_p02_p98": raw_limits,
-            "files": {"comparison_video": comparison_name},
-        }
-        (output_dir / "visualization.json").write_text(
-            json.dumps(metadata, indent=2), encoding="utf-8"
-        )
-        return metadata
-    delta_scale = fields["delta_scale"].astype(np.float32)
-    offset_norm = fields["offset_norm"].astype(np.float32)
-    field_confidence = fields["confidence"].astype(np.float32)
-    flow = np.load(flow_root / scene / "sea_raft_s_flow.npz")
     photo = load_anchor_disparity(depth_dir, anchor_model)
     manifest = json.loads((clip_dir / "manifest.json").read_text(encoding="utf-8"))
-    metrics = json.loads((result_root / scene / "metrics.json").read_text(encoding="utf-8"))
     anchor = int(manifest["anchor_index"])
-    jump_frame = int(metrics["v5_excess_jump_frame"])
     fps = float(manifest["target_fps"])
-    if len(raw) != len(v4) or len(raw) != len(v5):
+    if len(raw) != len(v4):
         raise ValueError(f"Frame count mismatch for scene {scene}")
-
     photo_low = cv2.resize(photo, (raw.shape[2], raw.shape[1]), interpolation=cv2.INTER_AREA)
     photo_limits = robust_limits(photo_low)
-    _write_depth_video(output_dir / "v5_depth_color.mp4", v5, photo_limits, fps, True)
-    _write_depth_video(output_dir / "v5_depth_gray.mp4", v5, photo_limits, fps, False)
-
+    raw_limits = robust_limits(raw)
+    _write_depth_video(output_dir / "v4_depth_color.mp4", v4, photo_limits, fps, True)
+    _write_depth_video(output_dir / "v4_depth_gray.mp4", v4, photo_limits, fps, False)
     panel_size = (320, 180)
     photo_color = colorize_depth(photo_low, photo_limits)
-    comparison_size = (panel_size[0] * 4, panel_size[1] + 48)
-    comparison_name = (
-        "depth_comparison_dav2_v5.mp4"
-        if anchor_model == "dav2-large"
-        else "depth_comparison_v5.mp4"
-    )
+    comparison_size = (panel_size[0] * 3, panel_size[1] + 48)
+    comparison_name = "depth_comparison_dav2_v4.mp4" if anchor_model == "dav2-large" else "depth_comparison_depthpro_v4.mp4"
     comparison_path = output_dir / comparison_name
     writer = cv2.VideoWriter(str(comparison_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, comparison_size)
     if not writer.isOpened():
         raise ValueError(f"Cannot create video: {comparison_path}")
-    diagnostic_path = output_dir / "field_diagnostics_v5.mp4"
-    diagnostic_writer = cv2.VideoWriter(
-        str(diagnostic_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, comparison_size
-    )
-    if not diagnostic_writer.isOpened():
-        raise ValueError(f"Cannot create video: {diagnostic_path}")
-    flow_confidence = np.ones_like(field_confidence)
-    backward_confidence = flow["confidence_previous"].astype(np.float32)
-    for index in range(1, len(flow_confidence)):
-        flow_confidence[index] = cv2.resize(
-            backward_confidence[index - 1],
-            (field_confidence.shape[2], field_confidence.shape[1]),
-            interpolation=cv2.INTER_AREA,
-        )
-    scene_config = {}
-    if validation_config.exists():
-        scene_config = json.loads(validation_config.read_text(encoding="utf-8")).get(scene, {})
-    inspection = select_inspection_frames(
-        scene,
-        len(raw),
-        anchor,
-        jump_frame,
-        scene_config.get("inspection_frames"),
-    )
-    key_frames: dict[int, np.ndarray] = {}
     for index in range(len(raw)):
         panels = [
-            _panel(colorize_depth(raw[index], photo_limits), f"VDA raw / frame {index:02d}", panel_size, photo_limits),
-            _panel(colorize_depth(v4[index], photo_limits), "V4 global monotonic LUT", panel_size, photo_limits),
-            _panel(colorize_depth(v5[index], photo_limits), "V5 flow local affine field", panel_size, photo_limits),
+            _panel(colorize_depth(raw[index], raw_limits), f"VDA normalized / frame {index:02d}", panel_size, raw_limits),
+            _panel(colorize_depth(v4[index], photo_limits), "V4.1 adaptive global LUT", panel_size, photo_limits),
             _panel(
                 photo_color,
                 "DAv2-Large photo anchor" if anchor_model == "dav2-large" else "DepthPro photo anchor",
@@ -263,22 +172,9 @@ def render_scene(
                 photo_limits,
             ),
         ]
-        frame = np.hstack(panels)
-        writer.write(frame)
-        if index in inspection:
-            key_frames[index] = frame.copy()
-        diagnostics = [
-            _panel(colorize_depth(delta_scale[index], (-0.2, 0.2)), "delta scale [-0.2, 0.2]", panel_size, (-0.2, 0.2)),
-            _panel(colorize_depth(offset_norm[index], (-0.2, 0.2)), "normalized offset [-0.2, 0.2]", panel_size, (-0.2, 0.2)),
-            _panel(colorize_depth(field_confidence[index], (0.0, 1.0)), "field confidence [0, 1]", panel_size, (0.0, 1.0)),
-            _panel(colorize_depth(flow_confidence[index], (0.0, 1.0)), "flow consistency [0, 1]", panel_size, (0.0, 1.0)),
-        ]
-        diagnostic_writer.write(np.hstack(diagnostics))
+        writer.write(np.hstack(panels))
     writer.release()
-    diagnostic_writer.release()
-    for index, frame in key_frames.items():
-        cv2.imwrite(str(output_dir / f"frame_{index:03d}_comparison.png"), frame)
-    cv2.imwrite(str(output_dir / "anchor_v5_gray16.png"), depth_to_gray16(v5[anchor], photo_limits))
+    cv2.imwrite(str(output_dir / "anchor_v4_gray16.png"), depth_to_gray16(v4[anchor], photo_limits))
     cv2.imwrite(str(output_dir / f"anchor_{anchor_model}_gray16.png"), depth_to_gray16(photo_low, photo_limits))
     if anchor_model == "dav2-large":
         depthpro_path = depth_dir / "photo_disparity.npy"
@@ -294,21 +190,18 @@ def render_scene(
             )
             cv2.imwrite(str(output_dir / "dav2_vs_depthpro_anchor.png"), comparison)
 
-    metadata: dict[str, object] = {
+    metadata = {
         "scene": scene,
         "anchor_model": anchor_model,
         "frame_count": len(raw),
         "fps": fps,
         "anchor_index": anchor,
-        "disparity_direction": "larger values are nearer",
-        "shared_photo_v4_v5_limits_p02_p98": photo_limits,
-        "inspection_frames": inspection,
+        "shared_limits_p02_p98": photo_limits,
+        "vda_sequence_limits_p02_p98": raw_limits,
         "files": {
             "comparison_video": comparison_name,
-            "diagnostic_video": "field_diagnostics_v5.mp4",
-            "v5_color_video": "v5_depth_color.mp4",
-            "v5_gray_video": "v5_depth_gray.mp4",
-            "inspection_pngs": [f"frame_{index:03d}_comparison.png" for index in inspection],
+            "v4_color_video": "v4_depth_color.mp4",
+            "v4_gray_video": "v4_depth_gray.mp4",
         },
     }
     (output_dir / "visualization.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
@@ -320,8 +213,6 @@ def main() -> None:
     parser.add_argument("--clip-root", type=Path, default=Path("artifacts/clips"))
     parser.add_argument("--depth-root", type=Path, default=Path("artifacts/depth"))
     parser.add_argument("--result-root", type=Path, default=Path("results"))
-    parser.add_argument("--flow-root", type=Path, default=Path("artifacts/flow"))
-    parser.add_argument("--validation-config", type=Path, default=Path("config/validation-scenes.json"))
     parser.add_argument("--anchor-model", choices=("dav2-large", "depthpro"), default="dav2-large")
     parser.add_argument("--scenes", nargs="+", default=["01", "02", "03"])
     args = parser.parse_args()
@@ -331,8 +222,6 @@ def main() -> None:
             args.clip_root,
             args.depth_root,
             args.result_root,
-            args.flow_root,
-            args.validation_config,
             args.anchor_model,
         )
         print(f"{scene}: {metadata['frame_count']} frames -> {args.result_root / scene / 'depth_visualization'}")

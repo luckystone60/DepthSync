@@ -1,5 +1,4 @@
 import unittest
-from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -8,8 +7,6 @@ import numpy as np
 
 from depthsync import DepthSync, DepthSyncConfig, FrameParameters, MotionSequence
 from depthsync.core import _largest_open_component, _static_guidance_mask
-from depthsync.flow import DenseFlowSequence
-from depthsync.local_field import load_local_fields, save_local_fields
 from depthsync.validation import prepare_validation_clip
 from depthsync.depth_visualization import colorize_depth, depth_to_gray16, normalize_depth
 
@@ -443,78 +440,6 @@ class DepthSyncTest(unittest.TestCase):
     def test_invalid_arguments(self):
         with self.assertRaises(ValueError):
             DepthSync()([], np.ones((4, 4), np.float32), 0)
-
-    def test_v5_without_rgb_or_flow_is_exact_v4_fallback(self):
-        base = np.linspace(0.2, 0.8, 72 * 128, dtype=np.float32).reshape(72, 128)
-        video = np.stack([base - 0.002, base, base + 0.002])
-        photo = (0.15 + 0.8 * base).astype(np.float32)
-        v4 = DepthSync(DepthSyncConfig(algorithm_version="v4")).offline_prepare(
-            video, photo, 1
-        )
-
-        v5 = DepthSync(DepthSyncConfig(algorithm_version="v5")).offline_prepare(
-            video, photo, 1
-        )
-
-        np.testing.assert_array_equal(v5.depths, v4.depths)
-        self.assertIsNone(v5.local_fields)
-        self.assertEqual(set(v5.fallback_reasons), {"v5_flow_unavailable"})
-
-    def test_v5_improves_local_anchor_and_apply_frame_replays(self):
-        base = np.full((72, 128), 0.45, np.float32)
-        video = np.stack([base, base, base])
-        photo = base.copy()
-        photo[:, :64] += 0.12
-        photo[:, 64:] -= 0.08
-        rgb = np.zeros((3, 72, 128, 3), np.uint8)
-        rgb[:, :, 64:] = 255
-        pair_shape = (2, 36, 64)
-        flow = DenseFlowSequence(
-            to_next=np.zeros(pair_shape + (2,), np.float32),
-            to_previous=np.zeros(pair_shape + (2,), np.float32),
-            confidence_next=np.ones(pair_shape, np.float32),
-            confidence_previous=np.ones(pair_shape, np.float32),
-            scene_cuts=np.zeros(2, bool),
-            frame_shape=(72, 128),
-        )
-        config = DepthSyncConfig(algorithm_version="v5", min_fit_pixels=24)
-        sync = DepthSync(config)
-
-        result = sync.offline_prepare(
-            video,
-            photo,
-            1,
-            rgb_frames=rgb,
-            dense_flow=flow,
-        )
-        v4 = DepthSync(
-            DepthSyncConfig(algorithm_version="v4", min_fit_pixels=24)
-        ).offline_prepare(video, photo, 1)
-
-        self.assertLess(
-            float(np.mean(np.abs(result.depths[1] - photo))),
-            float(np.mean(np.abs(v4.depths[1] - photo))),
-        )
-        replay = sync.apply_frame(video[1], result.parameters[1])
-        np.testing.assert_allclose(replay, result.depths[1], atol=1e-6)
-
-        with TemporaryDirectory() as directory:
-            path = Path(directory) / "v5_fields.npz"
-            self.assertIsNotNone(result.local_fields)
-            save_local_fields(path, result.local_fields)
-            loaded = load_local_fields(path)
-            serialized_replay = np.stack(
-                [
-                    sync.apply_frame(
-                        depth,
-                        replace(params, local_field=loaded.frame(index)),
-                    )
-                    for index, (depth, params) in enumerate(
-                        zip(video, result.parameters)
-                    )
-                ]
-            )
-        np.testing.assert_allclose(serialized_replay, result.depths, atol=3e-4)
 
     def test_validation_clip_has_exact_timeline(self):
         with TemporaryDirectory() as directory:

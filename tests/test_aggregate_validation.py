@@ -27,12 +27,10 @@ def test_aggregate_reports_per_tag_and_incomplete_scenes(tmp_path) -> None:
         (directory / "metrics.json").write_text(
             json.dumps(
                 {
-                    "v4_anchor_nmae": 0.10,
-                    "v5_anchor_nmae": 0.10 - gain,
-                    "v4_subject_anchor_nmae": 0.12,
-                    "v5_subject_anchor_nmae": 0.10,
+                    "raw_anchor_nmae": 0.10,
+                    "v4_anchor_nmae": 0.10 - gain,
+                    "v1_temporal_p95": 0.02,
                     "v4_temporal_p95": 0.02,
-                    "v5_temporal_p95": 0.021,
                     "v4_fallback_frames": 0,
                 }
             ),
