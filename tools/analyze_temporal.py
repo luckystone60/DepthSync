@@ -41,7 +41,7 @@ def main() -> None:
     raw = np.load(root / "artifacts/depth" / scene / "video_disparity.npz")["disparity"].astype(np.float32)
     photo = np.load(root / "artifacts/depth" / scene / "photo_disparity.npy").astype(np.float32)
     affine = np.load(root / "results" / scene / "affine_depth.npz")["disparity"].astype(np.float32)
-    synced = np.load(root / "results" / scene / "synced_depth.npz")["disparity"].astype(np.float32)
+    synced = np.load(root / "results" / scene / "v4_depth.npz")["disparity"].astype(np.float32)
     params = np.load(root / "results" / scene / "v4_parameters.npz")
     motion = load_motion(root / "results" / scene / "motion.npz")
     scale = robust_range(photo)

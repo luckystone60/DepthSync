@@ -15,41 +15,6 @@ from .anchors import load_anchor_disparity
 from .motion import estimate_block_motion, load_motion, save_motion
 
 
-def flat_correction_gradient_p99(
-    synced: np.ndarray,
-    base: np.ndarray,
-    flat_threshold: float,
-    region: np.ndarray | None = None,
-) -> float:
-    """P99 correction step on edges that are flat in the V4 base depth."""
-    synced = np.asarray(synced, dtype=np.float32)
-    base = np.asarray(base, dtype=np.float32)
-    if synced.shape != base.shape or synced.ndim != 2:
-        raise ValueError("synced and base must have equal [H,W] shapes")
-    correction = synced - base
-    values: list[np.ndarray] = []
-    for axis in (0, 1):
-        base_delta = np.diff(base, axis=axis)
-        correction_delta = np.diff(correction, axis=axis)
-        valid = (
-            np.isfinite(base_delta)
-            & np.isfinite(correction_delta)
-            & (np.abs(base_delta) < flat_threshold)
-        )
-        if region is not None:
-            region_pair = (
-                region[:-1] & region[1:]
-                if axis == 0
-                else region[:, :-1] & region[:, 1:]
-            )
-            valid &= region_pair
-        values.append(np.abs(correction_delta[valid]))
-    finite = np.concatenate([value for value in values if value.size]) if any(
-        value.size for value in values
-    ) else np.zeros(0, np.float32)
-    return float(np.quantile(finite, 0.99)) if finite.size else 0.0
-
-
 def _region_mask(shape: tuple[int, int], box: tuple[float, float, float, float]) -> np.ndarray:
     height, width = shape
     x0, y0, x1, y1 = box
@@ -210,23 +175,13 @@ def evaluate_scene(
         motion = estimate_block_motion(clip_dir / "clip.mp4")
         save_motion(motion_path, motion)
 
-    v1_sync = DepthSync(
-        DepthSyncConfig(
-            algorithm_version="v1",
-            depth_mode="disparity",
-            mapping_mode="affine",
-            residual_grid_shape=(0, 0),
-            static_grid_shape=(0, 0),
-            static_target_shape=(0, 0),
-            residual_radius=0,
-        )
+    v4_sync = DepthSync(DepthSyncConfig(depth_mode="disparity"))
+    v4, v4_prepare_ms, v4_apply_ms = _run(
+        v4_sync, video_depth, photo, anchor, motion, face_box
     )
-    v3_sync = DepthSync(DepthSyncConfig(depth_mode="disparity"))
-    v1, v1_prepare_ms, v1_apply_ms = _run(v1_sync, video_depth, photo, anchor, motion, face_box)
-    v3, v3_prepare_ms, v3_apply_ms = _run(v3_sync, video_depth, photo, anchor, motion, face_box)
     temporal_scale = _robust_range(photo_low) + 1e-6
-    v1_temporal = _temporal_errors(v1.depths, motion, temporal_scale)
-    v3_temporal = _temporal_errors(v3.depths, motion, temporal_scale)
+    raw_temporal = _temporal_errors(video_depth, motion, temporal_scale)
+    v4_temporal = _temporal_errors(v4.depths, motion, temporal_scale)
     if subject_box is None:
         x0, y0, x1, y1 = face_box
         subject_box = (
@@ -236,18 +191,18 @@ def evaluate_scene(
             min(y1 + 0.50, 1.0),
         )
     subject_region = _region_mask(photo_low.shape, subject_box)
-    v1_subject_temporal = _temporal_errors(
-        v1.depths, motion, temporal_scale, subject_region
+    raw_subject_temporal = _temporal_errors(
+        video_depth, motion, temporal_scale, subject_region
     )
-    v3_subject_temporal = _temporal_errors(
-        v3.depths, motion, temporal_scale, subject_region
+    v4_subject_temporal = _temporal_errors(
+        v4.depths, motion, temporal_scale, subject_region
     )
-    interior = slice(4, max(len(v3_temporal) - 5, 5))
+    interior = slice(4, max(len(v4_temporal) - 5, 5))
     tail_indices = temporal_frame_indices(tail_frames, len(video_depth))
     subject_temporal_selection: slice | np.ndarray = (
         tail_indices if tail_indices.size else interior
     )
-    excess = v3_temporal[interior] - v1_temporal[interior]
+    excess = v4_temporal[interior] - raw_temporal[interior]
     excess_index = int(np.nanargmax(excess)) + 5
 
     metrics: dict[str, float | int | str] = {
@@ -256,76 +211,46 @@ def evaluate_scene(
         "frame_count": int(len(video_depth)),
         "anchor_index": anchor,
         "raw_anchor_nmae": _anchor_nmae(video_depth[anchor], photo_low),
-        "v1_anchor_nmae": _anchor_nmae(v1.depths[anchor], photo_low),
-        "v4_anchor_nmae": _anchor_nmae(v3.depths[anchor], photo_low),
-        "v1_anchor_edge_nmae": _anchor_edge_nmae(v1.depths[anchor], photo_low),
-        "v4_anchor_edge_nmae": _anchor_edge_nmae(v3.depths[anchor], photo_low),
+        "v4_anchor_nmae": _anchor_nmae(v4.depths[anchor], photo_low),
+        "raw_anchor_edge_nmae": _anchor_edge_nmae(video_depth[anchor], photo_low),
+        "v4_anchor_edge_nmae": _anchor_edge_nmae(v4.depths[anchor], photo_low),
         "raw_switch_face": _aligned_switch_error(video_depth, photo_low, anchor, motion, face_box, True),
-        "v1_switch_face": _aligned_switch_error(v1.depths, photo_low, anchor, motion, face_box, True),
-        "v4_switch_face": _aligned_switch_error(v3.depths, photo_low, anchor, motion, face_box, True),
+        "v4_switch_face": _aligned_switch_error(v4.depths, photo_low, anchor, motion, face_box, True),
         "raw_switch_global": _aligned_switch_error(video_depth, photo_low, anchor, motion, face_box, False),
-        "v1_switch_global": _aligned_switch_error(v1.depths, photo_low, anchor, motion, face_box, False),
-        "v4_switch_global": _aligned_switch_error(v3.depths, photo_low, anchor, motion, face_box, False),
-        "v1_temporal_p95": float(np.nanquantile(v1_temporal[interior], 0.95)),
-        "v4_temporal_p95": float(np.nanquantile(v3_temporal[interior], 0.95)),
-        "v1_subject_temporal_p95": float(
-            np.nanquantile(v1_subject_temporal[subject_temporal_selection], 0.95)
+        "v4_switch_global": _aligned_switch_error(v4.depths, photo_low, anchor, motion, face_box, False),
+        "raw_temporal_p95": float(np.nanquantile(raw_temporal[interior], 0.95)),
+        "v4_temporal_p95": float(np.nanquantile(v4_temporal[interior], 0.95)),
+        "raw_subject_temporal_p95": float(
+            np.nanquantile(raw_subject_temporal[subject_temporal_selection], 0.95)
         ),
         "v4_subject_temporal_p95": float(
-            np.nanquantile(v3_subject_temporal[subject_temporal_selection], 0.95)
+            np.nanquantile(v4_subject_temporal[subject_temporal_selection], 0.95)
         ),
         "v4_excess_jump_max": float(np.nanmax(excess)),
         "v4_excess_jump_frame": excess_index,
-        "v1_prepare_ms_per_frame": v1_prepare_ms,
-        "v4_prepare_ms_per_frame": v3_prepare_ms,
-        "v1_apply_ms_per_frame": v1_apply_ms,
-        "v4_apply_ms_per_frame": v3_apply_ms,
+        "v4_prepare_ms_per_frame": v4_prepare_ms,
+        "v4_apply_ms_per_frame": v4_apply_ms,
         "v4_parameter_bytes": int(
-            v3.lut_x.nbytes + v3.lut_y.nbytes + v3.residual_grids.nbytes
-            + v3.static_mask.nbytes + v3.static_target_grid.nbytes
-            + v3.region_labels.nbytes + v3.region_scales.nbytes
-            + v3.region_offsets.nbytes + v3.region_shifts.nbytes
-            + np.dtype(np.float32).itemsize
+            v4.lut_x.nbytes + v4.lut_y.nbytes
+            + v4.scales.nbytes + v4.offsets.nbytes + v4.confidences.nbytes
         ),
-        "v4_fallback_frames": int(sum(bool(reason) for reason in v3.fallback_reasons)),
+        "v4_fallback_frames": int(sum(bool(reason) for reason in v4.fallback_reasons)),
     }
     if static_box is not None:
         x0, y0, x1, y1 = static_box
         ys = slice(int(y0 * video_depth.shape[1]), int(y1 * video_depth.shape[1]))
         xs = slice(int(x0 * video_depth.shape[2]), int(x1 * video_depth.shape[2]))
         photo_median = float(np.nanmedian(photo_low[ys, xs]))
-        v1_medians = np.nanmedian(v1.depths[:, ys, xs], axis=(1, 2))
-        v3_medians = np.nanmedian(v3.depths[:, ys, xs], axis=(1, 2))
+        raw_medians = np.nanmedian(video_depth[:, ys, xs], axis=(1, 2))
+        v4_medians = np.nanmedian(v4.depths[:, ys, xs], axis=(1, 2))
         metrics.update(
             {
                 "static_photo_median": photo_median,
-                "v1_static_median_range": float(np.nanmax(v1_medians) - np.nanmin(v1_medians)),
-                "v4_static_median_range": float(np.nanmax(v3_medians) - np.nanmin(v3_medians)),
-                "v4_static_photo_bias": float(np.nanmedian(np.abs(v3_medians - photo_median))),
+                "raw_static_median_range": float(np.nanmax(raw_medians) - np.nanmin(raw_medians)),
+                "v4_static_median_range": float(np.nanmax(v4_medians) - np.nanmin(v4_medians)),
+                "v4_static_photo_bias": float(np.nanmedian(np.abs(v4_medians - photo_median))),
             }
         )
-        guidance_mask = (
-            v3.static_mask
-            if v3.static_mask.size
-            else (v3.region_labels > 0).astype(np.float32)
-        )
-        if guidance_mask.size:
-            mask_full = cv2.resize(
-                guidance_mask,
-                (video_depth.shape[2], video_depth.shape[1]),
-                interpolation=cv2.INTER_NEAREST,
-            )
-            margin_y = max((ys.stop - ys.start) // 8, 1)
-            margin_x = max((xs.stop - xs.start) // 8, 1)
-            mask_inner = mask_full[
-                ys.start + margin_y : ys.stop - margin_y,
-                xs.start + margin_x : xs.stop - margin_x,
-            ]
-            metrics["v4_static_mask_laplacian_p95"] = float(
-                np.nanquantile(np.abs(cv2.Laplacian(mask_inner, cv2.CV_32F)), 0.95)
-            )
-        else:
-            metrics["v4_static_mask_laplacian_p95"] = 0.0
         edge_errors: list[float] = []
         fallback_widths: list[int] = []
         edge_threshold = 0.01 * temporal_scale
@@ -334,7 +259,7 @@ def evaluate_scene(
             if row_gradient.size == 0:
                 continue
             boundary = xs.start + int(np.argmax(row_gradient))
-            error = np.abs(v3.depths[anchor, y, xs.start:boundary] - photo_low[y, xs.start:boundary])
+            error = np.abs(v4.depths[anchor, y, xs.start:boundary] - photo_low[y, xs.start:boundary])
             if error.size == 0:
                 continue
             edge_errors.extend(error.tolist())
@@ -352,35 +277,25 @@ def evaluate_scene(
         metrics["v4_static_edge_fallback_width_median"] = (
             float(np.median(fallback_widths)) if fallback_widths else float("nan")
         )
-    np.savez_compressed(result_dir / "affine_depth.npz", disparity=v1.depths)
-    np.savez_compressed(result_dir / "synced_depth.npz", disparity=v3.depths)
-    np.savez_compressed(result_dir / "v4_depth.npz", disparity=v3.depths)
+    np.savez_compressed(result_dir / "v4_depth.npz", disparity=v4.depths)
     np.savez_compressed(
         result_dir / "temporal_errors.npz",
-        v1=v1_temporal,
-        v4=v3_temporal,
+        raw=raw_temporal,
+        v4=v4_temporal,
     )
     np.savez_compressed(
         result_dir / "v4_parameters.npz",
-        scales=v3.scales,
-        offsets=v3.offsets,
-        confidences=v3.confidences,
-        lut_x=v3.lut_x,
-        lut_y=v3.lut_y,
-        residual_grids=v3.residual_grids,
-        static_mask=v3.static_mask,
-        static_target_grid=v3.static_target_grid,
-        region_labels=v3.region_labels,
-        region_scales=v3.region_scales,
-        region_offsets=v3.region_offsets,
-        region_shifts=v3.region_shifts,
-        guidance_range=np.float32(v3.guidance_range),
-        fallback_reasons=np.asarray(v3.fallback_reasons),
+        scales=v4.scales,
+        offsets=v4.offsets,
+        confidences=v4.confidences,
+        lut_x=v4.lut_x,
+        lut_y=v4.lut_y,
+        fallback_reasons=np.asarray(v4.fallback_reasons),
     )
     with (result_dir / "parameters.csv").open("w", newline="", encoding="utf-8") as stream:
         writer = csv.writer(stream)
         writer.writerow(("frame", "lut_scale_correction", "lut_offset_correction", "confidence", "fallback_reason"))
-        for index, params in enumerate(v3.parameters):
+        for index, params in enumerate(v4.parameters):
             writer.writerow((index, params.scale, params.offset, params.confidence, params.fallback_reason))
     (result_dir / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     return metrics
@@ -391,46 +306,27 @@ def write_report(metrics: list[dict[str, float | int | str]], path: Path) -> Non
     lines = [
         "# DepthSync V4.1 全局单调 LUT 验证结果",
         "",
-        "| 场景 | 锚帧 NMAE V1→V4 | 人脸切换 V1→V4 | 全局切换 V1→V4 | 全局时序 P95 V1→V4 | 主体时序 P95 V1→V4 | 最大新增跳变（帧） | V4 ms/帧 |",
+        "| 场景 | 锚帧 NMAE raw→V4.1 | 人脸切换 raw→V4.1 | 全局切换 raw→V4.1 | 全局时序 P95 raw→V4.1 | 主体时序 P95 raw→V4.1 | 最大新增跳变（帧） | V4.1 ms/帧 |",
         "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for item in metrics:
         lines.append(
-            f"| {item['scene']} | {item['v1_anchor_nmae']:.4f} → {item['v4_anchor_nmae']:.4f} | "
-            f"{item['v1_switch_face']:.4f} → {item['v4_switch_face']:.4f} | "
-            f"{item['v1_switch_global']:.4f} → {item['v4_switch_global']:.4f} | "
-            f"{item['v1_temporal_p95']:.4f} → {item['v4_temporal_p95']:.4f} | "
-            f"{item['v1_subject_temporal_p95']:.4f} → {item['v4_subject_temporal_p95']:.4f} | "
+            f"| {item['scene']} | {item['raw_anchor_nmae']:.4f} → {item['v4_anchor_nmae']:.4f} | "
+            f"{item['raw_switch_face']:.4f} → {item['v4_switch_face']:.4f} | "
+            f"{item['raw_switch_global']:.4f} → {item['v4_switch_global']:.4f} | "
+            f"{item['raw_temporal_p95']:.4f} → {item['v4_temporal_p95']:.4f} | "
+            f"{item['raw_subject_temporal_p95']:.4f} → {item['v4_subject_temporal_p95']:.4f} | "
             f"{item['v4_excess_jump_max']:.4f}（{item['v4_excess_jump_frame']}） | "
             f"{item['v4_apply_ms_per_frame']:.3f} |"
         )
     lines.extend(
         [
             "",
-            "## 问题定位与修复",
+            "## V4.1 处理口径",
             "",
-            "- 旧版在每帧重新拟合完整 LUT，输入分布轻微变化会改变 LUT 横轴和节点；02 的第 23 帧因此出现映射突变。",
-            "- 锚点锁定结束后直接恢复高置信度更新，03 在锚点后的第 47 帧出现单帧参数跳变。",
-            "- 旧版残差只在 ±15 帧衰减，权重变化和累计 MV 噪声进一步放大了相邻帧差异。",
-            "- V3.1 固定锚帧 LUT 的非线性形状，逐帧只允许受限 affine 修正；锚点附近渐进解锁，并把残差衰减扩展到 ±30 帧。",
-            "- V3.2 将低运动、低相对深度变化区域识别为静态背景，播放时直接复用照片的 32×18 静态目标层，消除固定墙面的慢漂移；动态区域仍使用 V3.1 路径。",
-            "- V3.3 增加时序范围门控、照片深度边缘腐蚀和逐帧深度边缘保护；静态层不再侵入人物轮廓，粗残差也不会跨前后景混合。",
-            "- V3.4 对静态权重做小孔闭合与低通正则，再重新施加动态占用和深度边缘保护，消除 block MV 置信度孔洞在平面墙上形成的块状分层。",
-            "- V3.5 将静态照片目标层提升到 128×72，并对 8-bit 对比视频使用固定亚 LSB 抖动；前者减少低分辨率目标层的分段插值，后者只消除可视化量化产生的伪轮廓，不改变浮点深度。",
-            "- V3.6 定位到墙边约 15 像素宽的回退带：静态照片层在深度边缘被关闭后重新露出尺度不同的视频基础深度。新版用扩展人脸区域内的近景先验保护人物，同时允许静态背景掩码完成到物体边界。",
-            "- V3.7 修复 V3.6 的主体副作用：短时主体占用由 3 帧时域中值 + 全范围检测捕获；人物运动走廊不再形成轮廓形静态掩码孔洞，而是污染其所在的完整照片深度连通平面。主体走廊关闭 16×9 空间残差，仅保留固定 LUT 和全片恒定的小 offset。",
-            "- V4 最终撤下运行时空间区域修正：固定标签的全局平移会在 01 第 0 帧产生左右竖缝，常量区域 offset 会在第 60 帧形成“7”形硬轮廓。默认路径改为自适应选择 8/12/16 有效节点、统一序列化为 16 节点的全局单调 LUT，从机制上不再产生空间接缝。",
-            "",
-            "## 01 左墙与空间接缝专项检查",
-            "",
-            f"- V1 墙面中位值全片范围：{metrics[0].get('v1_static_median_range', float('nan')):.4f}。",
-            f"- V4 墙面中位值全片范围：{metrics[0].get('v4_static_median_range', float('nan')):.4f}；纯全局映射不再单独锁定墙面，这是取消空间接缝后的明确取舍。",
-            "- V4 默认区域标签为空，不执行标签 warp 或区域 offset；第 0 帧左右竖条/黑缝和第 60 帧“7”形轮廓没有生成路径。",
-            "",
-            "## 口径",
-            "",
-            "- V1 是逐帧全局 affine；V4 在锚帧自适应选择 8/12/16 有效节点的单调 LUT，随后统一为 16 节点定长结构，整段固定非线性形状。",
-            "- 照片深度只在离线准备阶段参与参数估计；播放阶段只执行全局 LUT 和逐帧小 affine，不读取照片深度、不应用任何空间参数，也不需要人物分割 mask。",
+            "- V4.1 在锚帧自适应选择 8/16/32/64 节点的全局单调 LUT，并统一为 64 节点定长参数。",
+            "- 照片深度只在离线准备阶段参与估计；播放阶段只执行一维 LUT，不读取照片深度、不应用空间参数。",
+            "- 低相关或分布突变帧冻结到稳定映射，避免大遮挡污染全局值域。",
             "- 时序指标是 block MV 补偿后的相邻帧中位差，P95 和最大新增跳变忽略首尾各 5 帧的流式模型启动/结束区。",
             "- 主体时序指标在扩展人脸 ROI 内计算，用于单独约束全局映射对人物一致性的影响。",
             "- 每段素材取中间 3 秒并统一为 30 fps / 90 帧，照片锚点为第 45 帧。",

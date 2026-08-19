@@ -41,7 +41,7 @@ def aggregate_validation(result_root: Path | str, manifest_path: Path | str) -> 
                 "scene": scene,
                 "tags": row["tags"],
                 "anchor_improvement": raw - v4,
-                "temporal_regression": float(metrics["v4_temporal_p95"]) - float(metrics["v1_temporal_p95"]),
+                "temporal_regression": float(metrics["v4_temporal_p95"]) - float(metrics["raw_temporal_p95"]),
                 "fallback_frames": int(metrics.get("v4_fallback_frames", 0)),
             }
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):

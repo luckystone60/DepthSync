@@ -11,25 +11,6 @@ import numpy as np
 from .anchors import load_anchor_disparity
 
 
-def select_inspection_frames(
-    scene: str,
-    frame_count: int,
-    anchor_index: int,
-    worst_jump_frame: int,
-    configured: list[int] | None,
-) -> list[int]:
-    """Return deterministic, valid frames for subjective V4.1 inspection."""
-    if configured is not None:
-        requested = configured
-    elif scene == "02":
-        requested = list(range(75, 90))
-    elif scene == "03":
-        requested = [anchor_index, worst_jump_frame - 1, worst_jump_frame, worst_jump_frame + 1]
-    else:
-        requested = [0, anchor_index, 60]
-    return sorted({min(max(int(index), 0), frame_count - 1) for index in requested})
-
-
 def robust_limits(values: np.ndarray, lower: float = 0.02, upper: float = 0.98) -> tuple[float, float]:
     finite = values[np.isfinite(values)]
     if finite.size == 0:

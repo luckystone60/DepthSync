@@ -13,12 +13,10 @@ def main() -> None:
     p.add_argument("--anchor", required=True, type=int, help="video index matching the photo")
     p.add_argument("--output", required=True, help="output .npz")
     p.add_argument("--mode", choices=("depth", "disparity"), default="depth")
-    p.add_argument("--mapping", choices=("affine", "lut"), default="lut")
-    p.add_argument("--residual-radius", type=int, default=30)
     args = p.parse_args()
     video = np.load(args.video_depth)
     photo = np.load(args.photo_depth)
-    sync = DepthSync(DepthSyncConfig(depth_mode=args.mode, mapping_mode=args.mapping, residual_radius=args.residual_radius))
+    sync = DepthSync(DepthSyncConfig(depth_mode=args.mode))
     result = sync(list(video), photo, args.anchor)
     np.savez_compressed(
         args.output,
@@ -28,14 +26,6 @@ def main() -> None:
         confidences=result.confidences,
         lut_x=result.lut_x,
         lut_y=result.lut_y,
-        residual_grids=result.residual_grids,
-        static_mask=result.static_mask,
-        static_target_grid=result.static_target_grid,
-        region_labels=result.region_labels,
-        region_scales=result.region_scales,
-        region_offsets=result.region_offsets,
-        region_shifts=result.region_shifts,
-        guidance_range=np.float32(result.guidance_range),
         fallback_reasons=np.asarray(result.fallback_reasons),
     )
 
