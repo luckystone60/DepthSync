@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 from pathlib import Path
 
 import cv2
@@ -123,21 +124,24 @@ def render_scene(
 
     raw = np.load(depth_dir / "video_disparity.npz")["disparity"].astype(np.float32)
     v4 = np.load(result_root / scene / "v4_depth.npz")["disparity"].astype(np.float32)
+    local = np.load(result_root / scene / "v41_local_depth.npz")["disparity"].astype(np.float32)
     photo = load_anchor_disparity(depth_dir, anchor_model)
     manifest = json.loads((clip_dir / "manifest.json").read_text(encoding="utf-8"))
     anchor = int(manifest["anchor_index"])
     fps = float(manifest["target_fps"])
-    if len(raw) != len(v4):
+    if len(raw) != len(v4) or len(raw) != len(local):
         raise ValueError(f"Frame count mismatch for scene {scene}")
     photo_low = cv2.resize(photo, (raw.shape[2], raw.shape[1]), interpolation=cv2.INTER_AREA)
     photo_limits = robust_limits(photo_low)
     raw_limits = robust_limits(raw)
     _write_depth_video(output_dir / "v4_depth_color.mp4", v4, photo_limits, fps, True)
     _write_depth_video(output_dir / "v4_depth_gray.mp4", v4, photo_limits, fps, False)
+    _write_depth_video(output_dir / "v41_local_depth_color.mp4", local, photo_limits, fps, True)
+    _write_depth_video(output_dir / "v41_local_depth_gray.mp4", local, photo_limits, fps, False)
     panel_size = (320, 180)
     photo_color = colorize_depth(photo_low, photo_limits)
-    comparison_size = (panel_size[0] * 3, panel_size[1] + 48)
-    comparison_name = "depth_comparison_dav2_v4.mp4" if anchor_model == "dav2-large" else "depth_comparison_depthpro_v4.mp4"
+    comparison_size = (panel_size[0] * 4, panel_size[1] + 48)
+    comparison_name = "depth_comparison_dav2_v41_local.mp4" if anchor_model == "dav2-large" else "depth_comparison_depthpro_v41_local.mp4"
     comparison_path = output_dir / comparison_name
     writer = cv2.VideoWriter(str(comparison_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, comparison_size)
     if not writer.isOpened():
@@ -146,6 +150,7 @@ def render_scene(
         panels = [
             _panel(colorize_depth(raw[index], raw_limits), f"VDA normalized / frame {index:02d}", panel_size, raw_limits),
             _panel(colorize_depth(v4[index], photo_limits), "V4.1 adaptive global LUT", panel_size, photo_limits),
+            _panel(colorize_depth(local[index], photo_limits), "V4.1 + flow local field", panel_size, photo_limits),
             _panel(
                 photo_color,
                 "DAv2-Large photo anchor" if anchor_model == "dav2-large" else "DepthPro photo anchor",
@@ -183,6 +188,8 @@ def render_scene(
             "comparison_video": comparison_name,
             "v4_color_video": "v4_depth_color.mp4",
             "v4_gray_video": "v4_depth_gray.mp4",
+            "local_color_video": "v41_local_depth_color.mp4",
+            "local_gray_video": "v41_local_depth_gray.mp4",
         },
     }
     (output_dir / "visualization.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
@@ -194,6 +201,7 @@ def main() -> None:
     parser.add_argument("--clip-root", type=Path, default=Path("artifacts/clips"))
     parser.add_argument("--depth-root", type=Path, default=Path("artifacts/depth"))
     parser.add_argument("--result-root", type=Path, default=Path("results"))
+    parser.add_argument("--compare-dir", type=Path, default=None)
     parser.add_argument("--anchor-model", choices=("dav2-large", "depthpro"), default="dav2-large")
     parser.add_argument("--scenes", nargs="+", default=["01", "02", "03"])
     args = parser.parse_args()
@@ -205,6 +213,10 @@ def main() -> None:
             args.result_root,
             args.anchor_model,
         )
+        compare_dir = args.compare_dir or (args.result_root / "compare_videos")
+        compare_dir.mkdir(parents=True, exist_ok=True)
+        source = args.result_root / scene / "depth_visualization" / metadata["files"]["comparison_video"]
+        shutil.copy2(source, compare_dir / f"{scene}_{source.name}")
         print(f"{scene}: {metadata['frame_count']} frames -> {args.result_root / scene / 'depth_visualization'}")
 
 

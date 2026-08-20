@@ -14,3 +14,6 @@ depthsync = "depthsync.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["depthsync*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

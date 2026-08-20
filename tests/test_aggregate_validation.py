@@ -29,8 +29,11 @@ def test_aggregate_reports_per_tag_and_incomplete_scenes(tmp_path) -> None:
                 {
                     "raw_anchor_nmae": 0.10,
                     "v4_anchor_nmae": 0.10 - gain,
+                    "local_anchor_nmae": 0.09 - gain,
                     "raw_temporal_p95": 0.02,
                     "v4_temporal_p95": 0.02,
+                    "local_temporal_p95": 0.021,
+                    "local_strength": 0.5,
                     "v4_fallback_frames": 0,
                 }
             ),
@@ -41,5 +44,5 @@ def test_aggregate_reports_per_tag_and_incomplete_scenes(tmp_path) -> None:
 
     assert report["incomplete"] == ["03"]
     assert report["tags"]["dance_motion"]["count"] == 2
-    assert report["tags"]["dance_motion"]["anchor_improvement_median"] == 0.02
+    assert report["tags"]["dance_motion"]["anchor_improvement_median"] == 0.03
     assert report["worst_anchor_improvement"][0]["scene"] == "02"

@@ -20,5 +20,16 @@
     "checkpoint_url": "https://huggingface.co/depth-anything/Video-Depth-Anything-Small/resolve/main/video_depth_anything_vits.pth",
     "local_checkpoint": "models/video_depth_anything_vits.pth",
     "sha256": "13379300B739E659F076A59D52E9801BD8D38C541A7E71F73BBCA4DCFB013609"
+  },
+  "sea_raft_small": {
+    "repository": "https://github.com/princeton-vl/SEA-RAFT",
+    "revision": "9137517ba24e628442aec097d3afe71d03503b75",
+    "config": "config/eval/spring-S.json",
+    "huggingface_repo": "MemorySlices/Tartan-C-T-TSKH-spring540x960-S",
+    "huggingface_revision": "31b9b4b711bd2d0d38cb99d93ba144beb2dc92",
+    "checkpoint_file": "model.safetensors",
+    "local_checkpoint": "models/sea_raft_s.safetensors",
+    "sha256": "D6A75E47F2630BA6C354CE84A322E24C3D9DEF668A6956F340A054B9A3211908",
+    "license": "BSD-3-Clause"
   }
 }

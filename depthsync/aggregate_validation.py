@@ -36,12 +36,14 @@ def aggregate_validation(result_root: Path | str, manifest_path: Path | str) -> 
         try:
             metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
             raw = float(metrics["raw_anchor_nmae"])
-            v4 = float(metrics["v4_anchor_nmae"])
+            local = float(metrics["local_anchor_nmae"])
             item = {
                 "scene": scene,
                 "tags": row["tags"],
-                "anchor_improvement": raw - v4,
-                "temporal_regression": float(metrics["v4_temporal_p95"]) - float(metrics["raw_temporal_p95"]),
+                "anchor_improvement": raw - local,
+                "temporal_regression": float(metrics["local_temporal_p95"]) - float(metrics["raw_temporal_p95"]),
+                "local_stage_temporal_regression": float(metrics["local_temporal_p95"]) - float(metrics["v4_temporal_p95"]),
+                "local_strength": float(metrics["local_strength"]),
                 "fallback_frames": int(metrics.get("v4_fallback_frames", 0)),
             }
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):
@@ -53,12 +55,16 @@ def aggregate_validation(result_root: Path | str, manifest_path: Path | str) -> 
         items = [item for item in complete if tag in item["tags"]]
         anchor = _summary([item["anchor_improvement"] for item in items])
         temporal = _summary([item["temporal_regression"] for item in items])
+        local_temporal = _summary([item["local_stage_temporal_regression"] for item in items])
         tags[tag] = {
             "count": len(items),
             "anchor_improvement_median": anchor["median"],
             "anchor_improvement_p90": anchor["p90"],
             "temporal_regression_median": temporal["median"],
             "temporal_regression_p90": temporal["p90"],
+            "local_stage_temporal_regression_median": local_temporal["median"],
+            "local_stage_temporal_regression_p90": local_temporal["p90"],
+            "local_strength_median": round(float(np.median([item["local_strength"] for item in items])), 8),
         }
     return {
         "scene_count": len(manifest["scenes"]),
